@@ -1,0 +1,114 @@
+name: Release macOS App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "macOS 目标架构"
+        required: true
+        default: "universal-apple-darwin"
+        type: choice
+        options:
+          - universal-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+      draft:
+        description: "创建为草稿 Release"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    name: Build & Publish macOS (${{ inputs.target || 'universal-apple-darwin' }})
+    runs-on: macos-latest
+    env:
+      TARGET: ${{ inputs.target || 'universal-apple-darwin' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust stable (Apple Silicon + Intel)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend & Rust tests
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      # 如需正式签名与公证（Apple Developer 账号），在仓库 Secrets 中配置：
+      #   APPLE_CERTIFICATE              (.p12 证书的 base64 编码)
+      #   APPLE_CERTIFICATE_PASSWORD     (.p12 导出密码)
+      #   APPLE_SIGNING_IDENTITY         (如 "Developer ID Application: Your Name (TEAMID)")
+      #   APPLE_ID                       (Apple ID 邮箱)
+      #   APPLE_PASSWORD                 (App 专用密码)
+      #   APPLE_TEAM_ID                  (10 位 Team ID)
+      # 未配置时会自动构建未签名的 macOS .app / .dmg，可直接本地安装使用。
+      - name: Build macOS bundle (.app & .dmg)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npx tauri build --target "${TARGET}" --bundles app,dmg
+
+      - name: Package .app.tar.gz & SHA256 checksums
+        run: |
+          mkdir -p release-assets
+          BUNDLE_DIR="src-tauri/target/${TARGET}/release/bundle"
+          cp "${BUNDLE_DIR}"/dmg/*.dmg release-assets/
+          tar -czf "release-assets/MyCurl-macOS-${TARGET}.app.tar.gz" -C "${BUNDLE_DIR}/macos" MyCurl.app
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+          ls -lh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyCurl-macOS-${{ env.TARGET }}
+          path: release-assets/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: ${{ inputs.draft == true }}
+          generate_release_notes: true
+          files: release-assets/*
+          body: |
+            ## MyCurl macOS 安装包
+
+            - **架构**：`${{ env.TARGET }}`（同时支持 Apple Silicon M1–M4 与 Intel Mac）
+            - **核心引擎**：Rust + Tauri v2（本地无 CORS 代理、流式 SSE、原子持久化）
+
+            > 若下载的是未签名版本，首次打开如遇 macOS 提示“无法验证开发者”，可执行：
+            > ```bash
+            > xattr -cr /Applications/MyCurl.app
+            > ```

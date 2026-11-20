@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.mycurl-data/
+src-tauri/target/
+src-tauri/gen/
+release-assets/
+.DS_Store
+*.log

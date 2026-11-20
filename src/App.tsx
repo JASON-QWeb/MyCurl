@@ -1,0 +1,235 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useAppStore } from './store/useAppStore';
+import { looksLikeCurl } from './lib/curlParser';
+import { isMacOS, isTauri, readClipboardNative } from './lib/bridge';
+import { clamp } from './lib/util';
+import { TopBar } from './components/TopBar';
+import { Sidebar } from './components/Sidebar';
+import { RequestPane } from './components/RequestPane';
+import { ResponsePane } from './components/ResponsePane';
+import { FolderView } from './components/FolderView';
+import { CurlImportModal } from './components/CurlImportModal';
+import { EnvModal } from './components/EnvModal';
+import { SettingsModal } from './components/SettingsModal';
+import { ExportModal } from './components/ExportModal';
+import { DocModal } from './components/DocModal';
+import { CommandPalette } from './components/CommandPalette';
+import { IconPlus, IconSparkles } from './components/Icons';
+
+export const App: React.FC = () => {
+  const {
+    data,
+    loaded,
+    selection,
+    toasts,
+    init,
+    createRequest,
+    sendRequest,
+    openImportModal,
+    setCommandPalette,
+    setClipboardCurl,
+    updateSettings,
+    removeToast,
+  } = useAppStore();
+
+  const [sidebarWidth, setSidebarWidth] = useState(data.settings.sidebarWidth || 270);
+  const [splitRatio, setSplitRatio] = useState(data.settings.responsePaneRatio || 0.5);
+  const [dragging, setDragging] = useState<'sidebar' | 'split' | null>(null);
+  const panesRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    init();
+  }, [init]);
+
+  useEffect(() => {
+    if (loaded) {
+      setSidebarWidth(data.settings.sidebarWidth || 270);
+      setSplitRatio(data.settings.responsePaneRatio || 0.5);
+    }
+  }, [loaded]);
+
+  // 主题同步
+  const [sysDark, setSysDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => setSysDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const isDark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && sysDark);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    if (isTauri() && isMacOS()) {
+      document.documentElement.setAttribute('data-macos-overlay', 'true');
+    }
+  }, [isDark]);
+
+  // 全局快捷键 + 非输入框粘贴 cURL 自动触发归档
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPalette(true);
+        return;
+      }
+      if (mod && (e.key.toLowerCase() === 'i' || (e.shiftKey && e.key.toLowerCase() === 'v'))) {
+        e.preventDefault();
+        openImportModal();
+        return;
+      }
+      if (mod && e.key === 'Enter') {
+        const state = useAppStore.getState();
+        if (!state.importModal?.open && state.selection?.kind === 'request') {
+          e.preventDefault();
+          sendRequest(state.selection.id);
+        }
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+        const el = document.activeElement;
+        if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
+          e.preventDefault();
+          createRequest(null);
+        }
+      }
+    };
+
+    const onPaste = (e: ClipboardEvent) => {
+      const state = useAppStore.getState();
+      if (state.importModal?.open) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.closest('.cm-editor'))) {
+        return;
+      }
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (looksLikeCurl(text)) {
+        e.preventDefault();
+        openImportModal(text);
+      }
+    };
+
+    const checkClipboard = async () => {
+      const text = await readClipboardNative();
+      if (text && looksLikeCurl(text)) setClipboardCurl(text);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('paste', onPaste);
+    window.addEventListener('focus', checkClipboard);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('paste', onPaste);
+      window.removeEventListener('focus', checkClipboard);
+    };
+  }, [createRequest, openImportModal, sendRequest, setClipboardCurl, setCommandPalette]);
+
+  // 拖拽调整侧边栏宽度与双栏比例
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      if (dragging === 'sidebar') {
+        setSidebarWidth(clamp(e.clientX, 195, 460));
+      } else if (dragging === 'split' && panesRef.current) {
+        const rect = panesRef.current.getBoundingClientRect();
+        if (data.settings.layout === 'horizontal') {
+          setSplitRatio(clamp((e.clientX - rect.left) / rect.width, 0.25, 0.75));
+        } else {
+          setSplitRatio(clamp((e.clientY - rect.top) / rect.height, 0.25, 0.75));
+        }
+      }
+    };
+    const onUp = () => {
+      if (dragging === 'sidebar') updateSettings({ sidebarWidth });
+      else if (dragging === 'split') updateSettings({ responsePaneRatio: splitRatio });
+      setDragging(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragging, sidebarWidth, splitRatio, data.settings.layout, updateSettings]);
+
+  const activeReq = selection?.kind === 'request' ? data.requests.find((r) => r.id === selection.id) ?? null : null;
+  const activeFolder = selection?.kind === 'folder' ? data.folders.find((f) => f.id === selection.id) ?? null : null;
+  const isVert = data.settings.layout === 'vertical';
+
+  return (
+    <div className="app-shell">
+      <TopBar />
+
+      <div className="main-area">
+        <Sidebar width={sidebarWidth} />
+        <div
+          className={`resizer ${dragging === 'sidebar' ? 'dragging' : ''}`}
+          onMouseDown={() => setDragging('sidebar')}
+        />
+
+        {activeFolder ? (
+          <FolderView folder={activeFolder} />
+        ) : activeReq ? (
+          <div ref={panesRef} className={`workspace-panes ${isVert ? 'vertical' : ''}`}>
+            <div
+              style={{
+                flexBasis: `${splitRatio * 100}%`,
+                flexGrow: 0,
+                flexShrink: 0,
+                display: 'flex',
+                minWidth: 0,
+                minHeight: 0,
+              }}
+            >
+              <RequestPane key={activeReq.id} req={activeReq} dark={isDark} />
+            </div>
+            <div
+              className={`resizer ${isVert ? 'resizer-h' : ''} ${dragging === 'split' ? 'dragging' : ''}`}
+              onMouseDown={() => setDragging('split')}
+            />
+            <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
+              <ResponsePane key={activeReq.id} req={activeReq} dark={isDark} />
+            </div>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <IconSparkles size={32} />
+            <h3>欢迎使用 MyCurl</h3>
+            <p>
+              直接复制 AI 给你的 cURL 命令并按 <span className="kbd">⌘V</span> 或点击下方按钮，MyCurl 会自动收纳密钥、路由前缀、请求体与{' '}
+              <code>jq</code> 筛选表达式并归档为文档。
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <button className="btn btn-primary" onClick={() => openImportModal()}>
+                <IconSparkles size={14} />
+                粘贴 cURL 智能归档
+              </button>
+              <button className="btn" onClick={() => createRequest(null)}>
+                <IconPlus size={14} />
+                新建空白请求
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 弹窗 */}
+      <CurlImportModal />
+      <EnvModal />
+      <SettingsModal />
+      <ExportModal />
+      <DocModal />
+      <CommandPalette />
+
+      {/* Toast 提示 */}
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast toast-${t.kind}`} onClick={() => removeToast(t.id)}>
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
