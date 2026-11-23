@@ -168,7 +168,7 @@ describe('集合导入导出与 URL 参数同步', () => {
     expect(syncUrlFromParams('https://a.com/x?a=1&b=2#top', params)).toBe('https://a.com/x?a=1#top');
   });
 
-  it('curlCopySecretMode 默认脱敏且支持明文与占位符配置持久化', () => {
+  it('curlCopySecretMode 默认脱敏且仅保留脱敏/明文二选一', () => {
     expect(defaultSettings().curlCopySecretMode).toBe('mask');
     const raw = seedData();
     // 兼容旧数据缺少该字段的情况

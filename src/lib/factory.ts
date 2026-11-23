@@ -128,6 +128,7 @@ export function normalizeData(raw: Partial<AppData> | null | undefined): AppData
   if (!raw || !raw.workspaces || !raw.workspaces.length) return seedData();
   const settings = { ...defaultSettings(), ...(raw.settings ?? {}) } as Settings;
   settings.import = { ...defaultSettings().import, ...(raw.settings?.import ?? {}) };
+  settings.curlCopySecretMode = settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
   settings.activeEnvironment = settings.activeEnvironment ?? {};
   const data: AppData = {
     version: 1,

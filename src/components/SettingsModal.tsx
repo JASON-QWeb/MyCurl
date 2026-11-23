@@ -264,12 +264,11 @@ export const SettingsModal: React.FC = () => {
               </div>
               <select
                 className="select select-sm"
-                value={s.curlCopySecretMode ?? 'mask'}
+                value={s.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask'}
                 onChange={(e) => updateSettings({ curlCopySecretMode: e.target.value as CurlCopySecretMode })}
               >
                 <option value="mask">{t('密钥脱敏（推荐）', 'Mask secrets (recommended)')}</option>
                 <option value="resolve">{t('填充真实明文密钥', 'Include raw secret values')}</option>
-                <option value="template">{t('保留 {{变量}} 占位符', 'Keep {{variable}} placeholders')}</option>
               </select>
             </div>
           </div>

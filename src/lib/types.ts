@@ -128,7 +128,7 @@ export interface Workspace {
 
 export type Language = 'zh' | 'en';
 
-export type CurlCopySecretMode = 'mask' | 'resolve' | 'template';
+export type CurlCopySecretMode = 'mask' | 'resolve';
 
 export interface Settings {
   theme: 'dark' | 'light' | 'system';

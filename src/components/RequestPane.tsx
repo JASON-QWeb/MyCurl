@@ -212,13 +212,11 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const enabledHeadersCount = req.headers.filter((h) => h.enabled && h.key.trim()).length + inheritedHeaders.length;
   const hasAuth = effectiveAuth.auth.type !== 'none';
 
-  const curlSecretMode = data.settings.curlCopySecretMode ?? 'mask';
+  const curlSecretMode = data.settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
   const copyCurlTitle =
     curlSecretMode === 'resolve'
       ? t('复制为 cURL 命令（含明文密钥）', 'Copy as cURL (raw secrets)')
-      : curlSecretMode === 'template'
-        ? t('复制为 cURL 命令（保留 {{变量}}）', 'Copy as cURL (keep {{variables}})')
-        : t('复制为 cURL 命令（密钥脱敏）', 'Copy as cURL (secrets masked)');
+      : t('复制为 cURL 命令（密钥脱敏）', 'Copy as cURL (secrets masked)');
 
   return (
     <section className="pane">
@@ -254,9 +252,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
               toast(
                 curlSecretMode === 'resolve'
                   ? t('已复制 cURL 命令（含明文密钥）', 'Copied cURL (raw secrets included)')
-                  : curlSecretMode === 'template'
-                    ? t('已复制 cURL 命令（保留 {{变量}}）', 'Copied cURL (with {{variables}})')
-                    : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
+                  : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
                 'success',
               );
             }}

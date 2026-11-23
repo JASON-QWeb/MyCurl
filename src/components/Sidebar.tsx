@@ -63,21 +63,17 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'request' | 'folder'; id: string; text: string } | null>(null);
 
-  const curlSecretMode = data.settings.curlCopySecretMode ?? 'mask';
+  const curlSecretMode = data.settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
   const copyCurlTitle =
     curlSecretMode === 'resolve'
       ? t('复制为 cURL（含明文密钥）', 'Copy as cURL (raw secrets)')
-      : curlSecretMode === 'template'
-        ? t('复制为 cURL（保留 {{变量}}）', 'Copy as cURL (keep {{variables}})')
-        : t('复制为 cURL（脱敏）', 'Copy as cURL (masked)');
+      : t('复制为 cURL（脱敏）', 'Copy as cURL (masked)');
   const copyRequestAsCurl = (r: HttpRequest) => {
     copyText(exportAsCurl(data, r, { secretMode: curlSecretMode, includeJq: true }));
     toast(
       curlSecretMode === 'resolve'
         ? t('已复制 cURL 命令（含明文密钥）', 'Copied cURL (raw secrets included)')
-        : curlSecretMode === 'template'
-          ? t('已复制 cURL 命令（保留 {{变量}}）', 'Copied cURL (with {{variables}})')
-          : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
+        : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
       'success',
     );
   };
