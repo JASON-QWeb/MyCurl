@@ -6,6 +6,7 @@ import { executeRequest } from '../lib/requestRunner';
 import { applyImport, importAll, type ImportOptions, type ImportPlan } from '../lib/curlImport';
 import type { ParsedCurl } from '../lib/curlParser';
 import { uid } from '../lib/util';
+import { tr } from '../lib/i18n';
 
 export interface ToastItem {
   id: string;
@@ -289,8 +290,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   createWorkspace: (name) => {
-    const ws = newWorkspace(name.trim() || '新工作区');
-    const base = newEnvironment(ws.id, { name: '全局变量', isBase: true });
+    const lang = get().data.settings.language;
+    const ws = newWorkspace(name.trim() || tr(lang, '新工作区', 'New Workspace'));
+    const base = newEnvironment(ws.id, { name: tr(lang, '全局变量', 'Global Variables'), isBase: true });
     get().mutate(
       (d) => ({
         ...d,
@@ -301,7 +303,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       true,
     );
     set({ selection: null });
-    get().toast(`已创建工作区「${ws.name}」`, 'success');
+    get().toast(tr(lang, `已创建工作区「${ws.name}」`, `Created workspace "${ws.name}"`), 'success');
     return ws;
   },
 
@@ -315,8 +317,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   deleteWorkspace: (id) => {
     const cur = get().data;
+    const lang = cur.settings.language;
     if (cur.workspaces.length <= 1) {
-      get().toast('至少保留一个工作区', 'warning');
+      get().toast(tr(lang, '至少保留一个工作区', 'At least one workspace is required'), 'warning');
       return;
     }
     const remaining = cur.workspaces.filter((w) => w.id !== id);
@@ -348,9 +351,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   createEnvironment: (name, color = '#6366f1') => {
-    const wsId = activeWsId(get().data);
-    const env = newEnvironment(wsId, { name: name.trim() || '新环境', color });
-    get().mutate((d) => ({ ...d, environments: [...d.environments, env] }));
+    const d = get().data;
+    const wsId = activeWsId(d);
+    const env = newEnvironment(wsId, { name: name.trim() || tr(d.settings.language, '新环境', 'New Environment'), color });
+    get().mutate((cur) => ({ ...cur, environments: [...cur.environments, env] }));
     return env;
   },
 
@@ -375,9 +379,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
-  createFolder: (parentId, name = '新文件夹') => {
-    const wsId = activeWsId(get().data);
-    const fld = newFolder(wsId, parentId, { name });
+  createFolder: (parentId, name) => {
+    const d = get().data;
+    const wsId = activeWsId(d);
+    const fld = newFolder(wsId, parentId, { name: name ?? tr(d.settings.language, '新文件夹', 'New Folder') });
     get().mutate((d) => ({ ...d, folders: [...d.folders, fld] }));
     set((s) => ({
       expandedFolders: { ...s.expandedFolders, [fld.id]: true, ...(parentId ? { [parentId]: true } : {}) },
@@ -427,14 +432,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const next = firstRequestInWs(get().data, activeWsId(get().data));
       set({ selection: next ? { kind: 'request', id: next.id } : null });
     }
-    if (folder) get().toast(`已删除文件夹「${folder.name}」`, 'success');
+    if (folder) get().toast(tr(d.settings.language, `已删除文件夹「${folder.name}」`, `Deleted folder "${folder.name}"`), 'success');
   },
 
   createRequest: (folderId, partial = {}) => {
     const d = get().data;
     const wsId = activeWsId(d);
     const maxOrder = Math.max(0, ...d.requests.filter((r) => r.workspaceId === wsId && r.folderId === folderId).map((r) => r.sortOrder));
-    const req = newRequest(wsId, folderId, { sortOrder: maxOrder + 1, ...partial });
+    const req = newRequest(wsId, folderId, { name: tr(d.settings.language, '新请求', 'New Request'), sortOrder: maxOrder + 1, ...partial });
     get().mutate((cur) => ({ ...cur, requests: [...cur.requests, req] }));
     if (folderId) {
       set((s) => ({ expandedFolders: { ...s.expandedFolders, [folderId]: true } }));
@@ -453,9 +458,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   duplicateRequest: (id) => {
     const src = get().data.requests.find((r) => r.id === id);
     if (!src) return null;
+    const lang = get().data.settings.language;
     const clone: HttpRequest = JSON.parse(JSON.stringify(src));
     clone.id = uid('req_');
-    clone.name = `${src.name}（副本）`;
+    clone.name = tr(lang, `${src.name}（副本）`, `${src.name} (Copy)`);
     clone.sortOrder = src.sortOrder + 0.5;
     clone.createdAt = Date.now();
     clone.updatedAt = Date.now();
@@ -504,8 +510,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set((s) => ({ expandedFolders: { ...s.expandedFolders, [res.folderId!]: true } }));
     }
     get().selectRequest(res.requestId);
-    const varMsg = res.createdVars.length ? `，收纳变量 ${res.createdVars.map((k) => `{{${k}}}`).join('、')}` : '';
-    get().toast(res.created ? `已归档至「${plan.folder.name}」${varMsg}` : `已跳转到已有请求「${plan.duplicateOf?.name}」`, 'success');
+    const lang = res.data.settings.language;
+    const varMsg = res.createdVars.length
+      ? tr(lang, `，收纳变量 ${res.createdVars.map((k) => `{{${k}}}`).join('、')}`, `, extracted ${res.createdVars.map((k) => `{{${k}}}`).join(', ')}`)
+      : '';
+    get().toast(
+      res.created
+        ? tr(lang, `已归档至「${plan.folder.name}」${varMsg}`, `Imported to "${plan.folder.name}"${varMsg}`)
+        : tr(lang, `已跳转到已有请求「${plan.duplicateOf?.name}」`, `Switched to existing request "${plan.duplicateOf?.name}"`),
+      'success',
+    );
     if (autoSend) {
       setTimeout(() => get().sendRequest(res.requestId), 50);
     }
@@ -529,7 +543,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const lastId = results[results.length - 1]?.requestId ?? null;
     if (lastId) get().selectRequest(lastId);
     const createdCount = results.filter((r) => r.created).length;
-    get().toast(`已批量归档 ${createdCount} 条请求${results.length > createdCount ? `（${results.length - createdCount} 条重复已跳过）` : ''}`, 'success');
+    const lang = next.settings.language;
+    const dupCount = results.length - createdCount;
+    get().toast(
+      tr(
+        lang,
+        `已批量归档 ${createdCount} 条请求${dupCount > 0 ? `（${dupCount} 条重复已跳过）` : ''}`,
+        `Imported ${createdCount} request${createdCount === 1 ? '' : 's'}${dupCount > 0 ? ` (${dupCount} duplicate${dupCount === 1 ? '' : 's'} skipped)` : ''}`,
+      ),
+      'success',
+    );
     if (autoSend && lastId) {
       setTimeout(() => get().sendRequest(lastId), 50);
     }

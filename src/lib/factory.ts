@@ -60,6 +60,7 @@ export function newWorkspace(name = '我的工作区'): Workspace {
 export function defaultSettings(): Settings {
   return {
     theme: 'dark',
+    language: 'zh',
     activeWorkspaceId: null,
     activeEnvironment: {},
     timeoutMs: 120_000,

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DYNAMIC_VARS, TEMPLATE_RE, type ResolvedVar, type VarMap } from '../lib/template';
 import { maskSecret } from '../lib/util';
 import { looksLikeCurl } from '../lib/curlParser';
+import { useI18n } from '../lib/i18n';
 import { IconCheck, IconChevronDown, IconKey, IconLayers } from './Icons';
 
 export interface VarPickerAction {
@@ -64,12 +65,12 @@ const SOURCE_RANK: Record<ResolvedVar['sourceKind'], number> = {
   dynamic: 3,
 };
 
-function formatVarDetail(v: ResolvedVar): string {
+function formatVarDetail(v: ResolvedVar, emptyLabel: string): string {
   const shown = v.secret
     ? maskSecret(v.value)
     : v.value.length > 28
       ? v.value.slice(0, 28) + '…'
-      : v.value || '(空)';
+      : v.value || emptyLabel;
   return `${shown} · ${v.source}`;
 }
 
@@ -85,9 +86,12 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
   onPasteCurl,
   inputRef,
   showVarPicker = false,
-  varPickerLabel = '选择',
+  varPickerLabel,
   varPickerActions,
 }) => {
+  const { t } = useI18n();
+  const pickerBtnLabel = varPickerLabel ?? t('选择', 'Select');
+  const emptyLabel = t('(空)', '(empty)');
   const wrapRef = useRef<HTMLDivElement>(null);
   const localRef = useRef<HTMLInputElement>(null);
   const elRef = inputRef ?? localRef;
@@ -319,7 +323,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
         <button
           type="button"
           className={`tpl-picker-btn ${pickerOpen ? 'open' : ''}`}
-          title="从已有密钥或变量中下拉选择"
+          title={t('从已有密钥或变量中下拉选择', 'Select from existing secrets or variables')}
           aria-haspopup="listbox"
           aria-expanded={pickerOpen}
           onMouseDown={(e) => e.preventDefault()}
@@ -329,7 +333,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
           }}
         >
           <IconKey size={12} />
-          <span>{varPickerLabel}</span>
+          <span>{pickerBtnLabel}</span>
           <IconChevronDown size={12} />
         </button>
       )}
@@ -357,12 +361,17 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
       {showVarPicker && pickerOpen && (
         <div className="tpl-popover tpl-picker-pop" role="listbox">
           {flatPickerVars.length === 0 ? (
-            <div className="tpl-pop-empty">当前作用域暂无可选密钥或变量，可直接输入明文或先添加密钥。</div>
+            <div className="tpl-pop-empty">
+              {t(
+                '当前作用域暂无可选密钥或变量，可直接输入明文或先添加密钥。',
+                'No secrets or variables in this scope yet. Enter a value directly or add a secret first.',
+              )}
+            </div>
           ) : (
             <>
               {secretVars.length > 0 && (
                 <>
-                  <div className="tpl-pop-group">密钥变量</div>
+                  <div className="tpl-pop-group">{t('密钥变量', 'Secrets')}</div>
                   {secretVars.map((v, idx) => {
                     const selected = trimmedValue === `{{${v.key}}}`;
                     return (
@@ -382,7 +391,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
                           {`{{${v.key}}}`}
                         </span>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <span className="tpl-pop-val">{formatVarDetail(v)}</span>
+                          <span className="tpl-pop-val">{formatVarDetail(v, emptyLabel)}</span>
                           {selected && <IconCheck size={13} />}
                         </span>
                       </div>
@@ -393,7 +402,9 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
 
               {otherVars.length > 0 && (
                 <>
-                  <div className="tpl-pop-group">{secretVars.length > 0 ? '其他可用变量' : '可用变量'}</div>
+                  <div className="tpl-pop-group">
+                    {secretVars.length > 0 ? t('其他可用变量', 'Other Variables') : t('可用变量', 'Variables')}
+                  </div>
                   {otherVars.map((v, i) => {
                     const flatIdx = secretVars.length + i;
                     const selected = trimmedValue === `{{${v.key}}}`;
@@ -411,7 +422,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
                       >
                         <span className="tpl-pop-key">{`{{${v.key}}}`}</span>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <span className="tpl-pop-val">{formatVarDetail(v)}</span>
+                          <span className="tpl-pop-val">{formatVarDetail(v, emptyLabel)}</span>
                           {selected && <IconCheck size={13} />}
                         </span>
                       </div>

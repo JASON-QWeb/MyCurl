@@ -5,6 +5,7 @@ import { applyFilterToText } from '../lib/jq';
 import { isSseContent, parseSse } from '../lib/sse';
 import { prettyJson } from '../lib/curlParser';
 import { copyText, formatBytes, formatMs, maskSecret, relativeTime } from '../lib/util';
+import { useI18n } from '../lib/i18n';
 import { CodeEditor, type CodeLang } from './CodeEditor';
 import {
   IconCopy,
@@ -35,13 +36,6 @@ function detectLang(ct: string, body: string): CodeLang {
   return 'text';
 }
 
-const JQ_PRESETS = [
-  { label: 'AI 回复', expr: '.choices[0].message.content // .error.message // .' },
-  { label: '模型列表', expr: '.data[].id' },
-  { label: 'Claude', expr: '.content[0].text // .error.message // .' },
-  { label: 'Gemini', expr: '.candidates[0].content.parts[0].text // .error.message // .' },
-];
-
 export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?: boolean }> = ({ req, dark, vertical }) => {
   const {
     data,
@@ -53,6 +47,14 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     deleteResponseHistory,
     toast,
   } = useAppStore();
+  const { t } = useI18n();
+
+  const jqPresets = [
+    { label: t('AI 回复', 'AI Reply'), expr: '.choices[0].message.content // .error.message // .' },
+    { label: t('模型列表', 'Models'), expr: '.data[].id' },
+    { label: 'Claude', expr: '.content[0].text // .error.message // .' },
+    { label: 'Gemini', expr: '.candidates[0].content.parts[0].text // .error.message // .' },
+  ];
 
   const [tab, setTab] = useState<'body' | 'headers' | 'request'>('body');
   const [bodyMode, setBodyMode] = useState<'pretty' | 'raw' | 'preview'>('pretty');
@@ -92,8 +94,8 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
   const editorLang: CodeLang = useMemo(() => {
     if (!resp) return 'text';
     if (filterResult?.ok) {
-      const t = filterResult.output.trim();
-      return t.startsWith('{') || t.startsWith('[') ? 'json' : 'text';
+      const text = filterResult.output.trim();
+      return text.startsWith('{') || text.startsWith('[') ? 'json' : 'text';
     }
     return bodyMode === 'raw' ? 'text' : detectLang(resp.contentType, resp.body);
   }, [resp, filterResult, bodyMode]);
@@ -132,7 +134,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
         <div className="status-group">
           {running && (
             <span className="pill pill-accent">
-              {resp && resp.status > 0 ? '接收流式数据中…' : '正在发送…'}
+              {resp && resp.status > 0 ? t('接收流式数据中…', 'Streaming…') : t('正在发送…', 'Sending…')}
             </span>
           )}
           {resp && !resp.error && resp.status > 0 && (
@@ -140,20 +142,20 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               <span className={`status-pill ${statusClass(resp.status)}`}>
                 {resp.status} {resp.statusText}
               </span>
-              <span className="metric-chip" title={resp.ttfbMs ? `首字节 TTFB：${formatMs(resp.ttfbMs)}` : undefined}>
+              <span className="metric-chip" title={resp.ttfbMs ? `TTFB: ${formatMs(resp.ttfbMs)}` : undefined}>
                 {formatMs(resp.timeMs)}
               </span>
               <span className="metric-chip">{formatBytes(resp.size)}</span>
               {resp.redirects && resp.redirects.length > 0 && (
                 <span className="pill pill-info" title={resp.redirects.join('\n')}>
-                  {resp.redirects.length} 次重定向
+                  {t(`${resp.redirects.length} 次重定向`, `${resp.redirects.length} redirect(s)`)}
                 </span>
               )}
-              {isSse && <span className="pill pill-accent">SSE 流式</span>}
+              {isSse && <span className="pill pill-accent">{t('SSE 流式', 'SSE Stream')}</span>}
             </>
           )}
-          {resp?.error && <span className="status-pill status-err">请求异常</span>}
-          {!resp && !running && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>响应结果</span>}
+          {resp?.error && <span className="status-pill status-err">{t('请求异常', 'Request Error')}</span>}
+          {!resp && !running && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('响应结果', 'Response')}</span>}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -161,15 +163,15 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             <>
               <button
                 className="btn btn-ghost btn-icon btn-sm"
-                title="复制当前显示内容"
+                title={t('复制当前显示内容', 'Copy response')}
                 onClick={() => {
                   copyText(isSse && parsedSse?.assembledText ? parsedSse.assembledText : displayedBody);
-                  toast('已复制响应内容', 'success');
+                  toast(t('已复制响应内容', 'Copied response'), 'success');
                 }}
               >
                 <IconCopy size={13} />
               </button>
-              <button className="btn btn-ghost btn-icon btn-sm" title="下载响应文件" onClick={downloadBody}>
+              <button className="btn btn-ghost btn-icon btn-sm" title={t('下载响应文件', 'Download response')} onClick={downloadBody}>
                 <IconDownload size={13} />
               </button>
             </>
@@ -181,16 +183,16 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               className="btn btn-ghost btn-sm"
               onClick={() => setHistOpen((v) => !v)}
               disabled={history.length === 0}
-              title="查看历史响应"
+              title={t('查看历史响应', 'Response history')}
             >
               <IconHistory size={13} />
-              <span>历史{history.length > 0 ? ` (${history.length})` : ''}</span>
+              <span>{t('历史', 'History')}{history.length > 0 ? ` (${history.length})` : ''}</span>
             </button>
             {histOpen && (
               <div className="menu-pop right" style={{ minWidth: 270, maxHeight: 320, overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px' }}>
                   <span className="menu-title" style={{ padding: 0 }}>
-                    最近响应记录
+                    {t('最近响应记录', 'Recent Responses')}
                   </span>
                   <button
                     className="btn btn-ghost btn-sm"
@@ -200,7 +202,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                       setHistOpen(false);
                     }}
                   >
-                    清空
+                    {t('清空', 'Clear')}
                   </button>
                 </div>
                 {history.map((h) => (
@@ -225,7 +227,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                     <button
                       className="btn btn-ghost btn-icon btn-sm"
                       onClick={() => deleteResponseHistory(req.id, h.id)}
-                      title="删除此记录"
+                      title={t('删除此记录', 'Delete entry')}
                     >
                       <IconTrash size={11} />
                     </button>
@@ -242,7 +244,10 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
         <IconFilter size={13} className="jq-icon" />
         <input
           className="jq-input"
-          placeholder="jq / JSONPath 筛选（如 .choices[0].message.content // .error.message // .）"
+          placeholder={t(
+            'jq / JSONPath 筛选（如 .choices[0].message.content // .error.message // .）',
+            'jq / JSONPath filter (e.g. .choices[0].message.content // .error.message // .)',
+          )}
           value={filterExpr}
           onChange={(e) => {
             updateRequest(req.id, { responseFilter: e.target.value });
@@ -253,15 +258,15 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           <>
             <div className="segmented">
               <button className={filterEnabled ? 'active' : ''} onClick={() => setFilterEnabled(true)}>
-                筛选
+                {t('筛选', 'Filtered')}
               </button>
               <button className={!filterEnabled ? 'active' : ''} onClick={() => setFilterEnabled(false)}>
-                原始
+                {t('原始', 'Raw')}
               </button>
             </div>
             <button
               className="btn btn-ghost btn-icon btn-sm"
-              title="清除筛选表达式"
+              title={t('清除筛选表达式', 'Clear filter')}
               onClick={() => updateRequest(req.id, { responseFilter: '' })}
             >
               <IconX size={13} />
@@ -269,9 +274,9 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           </>
         ) : (
           <div style={{ display: 'flex', gap: 4 }}>
-            {JQ_PRESETS.slice(0, 2).map((p) => (
+            {jqPresets.slice(0, 2).map((p) => (
               <button
-                key={p.label}
+                key={p.expr}
                 className="btn btn-ghost btn-sm"
                 style={{ fontSize: 11, height: 22, padding: '0 6px' }}
                 onClick={() => {
@@ -288,19 +293,26 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
       </div>
 
       {filterResult && !filterResult.ok && (
-        <div className="jq-error">jq 筛选提示：{filterResult.error}（下方显示原始响应）</div>
+        <div className="jq-error">
+          {t(`jq 筛选提示：${filterResult.error}（下方显示原始响应）`, `jq filter note: ${filterResult.error} (showing raw response)`)}
+        </div>
       )}
 
       {!resp ? (
         <div className="empty-state">
           <IconSparkles size={26} />
-          <h3>按下 ⌘↵ 或点击「发送」测试接口</h3>
-          <p>支持自动解析 AI 返回的 JSON 与 SSE 流式对话，以及导入自 cURL 管道的 jq 表达式实时筛选。</p>
+          <h3>{t('按下 ⌘↵ 或点击「发送」测试接口', 'Press ⌘↵ or click "Send" to test')}</h3>
+          <p>
+            {t(
+              '支持自动解析 AI 返回的 JSON 与 SSE 流式对话，以及导入自 cURL 管道的 jq 表达式实时筛选。',
+              'Auto-formats JSON and SSE AI streams, with live jq filtering imported from cURL pipes.',
+            )}
+          </p>
         </div>
       ) : resp.error ? (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div className="error-card">
-            <h4>请求未能完成</h4>
+            <h4>{t('请求未能完成', 'Request Failed')}</h4>
             <p>{resp.error}</p>
             <div className="mono" style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-dim)', wordBreak: 'break-all' }}>
               {resp.method} {resp.url}
@@ -312,28 +324,32 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           <div className="tabs-bar">
             <div className="tabs-list">
               <button className={`tab-btn ${tab === 'body' ? 'active' : ''}`} onClick={() => setTab('body')}>
-                响应体
-                {filterResult?.ok && <span className="pill pill-success" style={{ padding: '0 5px', fontSize: 10 }}>jq 已筛选</span>}
+                {t('响应体', 'Body')}
+                {filterResult?.ok && (
+                  <span className="pill pill-success" style={{ padding: '0 5px', fontSize: 10 }}>
+                    {t('jq 已筛选', 'jq filtered')}
+                  </span>
+                )}
               </button>
               <button className={`tab-btn ${tab === 'headers' ? 'active' : ''}`} onClick={() => setTab('headers')}>
-                响应头
+                {t('响应头', 'Headers')}
                 <span className="tab-count">{resp.headers.length}</span>
               </button>
               <button className={`tab-btn ${tab === 'request' ? 'active' : ''}`} onClick={() => setTab('request')}>
-                实际请求
+                {t('实际请求', 'Sent Request')}
               </button>
             </div>
             {tab === 'body' && !isImage && (
               <div className="segmented">
                 <button className={bodyMode === 'pretty' ? 'active' : ''} onClick={() => setBodyMode('pretty')}>
-                  {isSse ? '对话视图' : '美化'}
+                  {isSse ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
                 </button>
                 <button className={bodyMode === 'raw' ? 'active' : ''} onClick={() => setBodyMode('raw')}>
-                  原始
+                  {t('原始', 'Raw')}
                 </button>
                 {(isHtml || isSse) && (
                   <button className={bodyMode === 'preview' ? 'active' : ''} onClick={() => setBodyMode('preview')}>
-                    {isSse ? '事件流' : '网页预览'}
+                    {isSse ? t('事件流', 'Events') : t('网页预览', 'Preview')}
                   </button>
                 )}
               </div>
@@ -347,7 +363,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <div className="tab-scroll" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <img
                       src={`data:${resp.contentType};base64,${resp.bodyBase64}`}
-                      alt="响应图片"
+                      alt={t('响应图片', 'Response image')}
                       style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, border: '1px solid var(--border)' }}
                     />
                   </div>
@@ -355,16 +371,28 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <div className="sse-view">
                     {parsedSse.assembledReasoning && (
                       <div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>思考过程</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>{t('思考过程', 'Reasoning')}</div>
                         <div className="sse-reasoning">{parsedSse.assembledReasoning}</div>
                       </div>
                     )}
                     <div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>AI 流式回复拼接（共 {parsedSse.events.length} 个事件{parsedSse.done ? ' · 已结束' : ''}）</span>
+                        <span>
+                          {t(
+                            `AI 流式回复拼接（共 ${parsedSse.events.length} 个事件${parsedSse.done ? ' · 已结束' : ''}）`,
+                            `Assembled SSE stream (${parsedSse.events.length} events${parsedSse.done ? ' · Done' : ''})`,
+                          )}
+                        </span>
                       </div>
                       <div className="sse-answer-box">
-                        {parsedSse.assembledText || <span style={{ color: 'var(--text-muted)' }}>（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）</span>}
+                        {parsedSse.assembledText || (
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {t(
+                              '（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）',
+                              '(No text delta parsed yet — switch to "Events" or "Raw" to inspect)',
+                            )}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -380,7 +408,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   </div>
                 ) : isHtml && bodyMode === 'preview' ? (
                   <iframe
-                    title="HTML 响应预览"
+                    title={t('HTML 响应预览', 'HTML Preview')}
                     sandbox=""
                     srcDoc={resp.body}
                     style={{ flex: 1, border: 'none', background: '#fff' }}
@@ -403,7 +431,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <input
                     className="input input-sm"
                     style={{ width: '100%' }}
-                    placeholder="过滤响应头…"
+                    placeholder={t('过滤响应头…', 'Filter headers…')}
                     value={headerQuery}
                     onChange={(e) => setHeaderQuery(e.target.value)}
                   />
@@ -411,8 +439,8 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 <table className="kv-table">
                   <thead>
                     <tr>
-                      <th style={{ width: '36%' }}>名称</th>
-                      <th>值</th>
+                      <th style={{ width: '36%' }}>{t('名称', 'Name')}</th>
+                      <th>{t('值', 'Value')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -435,7 +463,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               <div className="tab-scroll">
                 <div className="card" style={{ marginBottom: 12 }}>
                   <div className="card-title">
-                    <span>实际发送地址</span>
+                    <span>{t('实际发送地址', 'Resolved URL')}</span>
                   </div>
                   <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
                     <strong>{resp.method}</strong> {resp.url}
@@ -443,7 +471,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 </div>
                 {resp.redirects && resp.redirects.length > 0 && (
                   <div className="card" style={{ marginBottom: 12 }}>
-                    <div className="card-title">重定向链路</div>
+                    <div className="card-title">{t('重定向链路', 'Redirect Chain')}</div>
                     {resp.redirects.map((r, i) => (
                       <div key={i} className="mono" style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>
                         {i + 1}. {r}
@@ -453,17 +481,17 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 )}
                 <div className="card" style={{ marginBottom: 12 }}>
                   <div className="card-title">
-                    <span>实际发送的请求头</span>
+                    <span>{t('实际发送的请求头', 'Sent Headers')}</span>
                     <button className="btn btn-ghost btn-sm" onClick={() => setShowReqSecrets((v) => !v)}>
                       {showReqSecrets ? <IconEyeOff size={12} /> : <IconEye size={12} />}
-                      {showReqSecrets ? '遮罩密钥' : '显示明文'}
+                      {showReqSecrets ? t('遮罩密钥', 'Mask Secrets') : t('显示明文', 'Reveal Secrets')}
                     </button>
                   </div>
                   <table className="kv-table">
                     <tbody>
                       {(resp.requestHeaders ?? []).map(([k, v], i) => {
                         const isSensitive = /authorization|api[-_]?key|token|cookie|secret/i.test(k);
-                        const shown = isSensitive && !showReqSecrets ? v.replace(/(Bearer\s+|Basic\s+)?(\S+)/, (_, p, t) => `${p || ''}${maskSecret(t)}`) : v;
+                        const shown = isSensitive && !showReqSecrets ? v.replace(/(Bearer\s+|Basic\s+)?(\S+)/, (_, p, tok) => `${p || ''}${maskSecret(tok)}`) : v;
                         return (
                           <tr key={i}>
                             <td className="mono" style={{ fontSize: 11.5, width: '34%', color: 'var(--var-fg)' }}>
@@ -480,7 +508,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 </div>
                 {resp.requestBodyPreview && (
                   <div className="card">
-                    <div className="card-title">实际发送的请求体</div>
+                    <div className="card-title">{t('实际发送的请求体', 'Sent Body')}</div>
                     <pre className="md-pre" style={{ margin: 0, maxHeight: 260 }}>
                       <code>{resp.requestBodyPreview}</code>
                     </pre>

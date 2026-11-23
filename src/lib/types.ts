@@ -126,8 +126,11 @@ export interface Workspace {
   createdAt: number;
 }
 
+export type Language = 'zh' | 'en';
+
 export interface Settings {
   theme: 'dark' | 'light' | 'system';
+  language: Language;
   activeWorkspaceId: string | null;
   /** workspaceId -> 当前子环境 id */
   activeEnvironment: Record<string, string | null>;

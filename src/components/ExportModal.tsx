@@ -2,10 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { exportAsCurl, exportAsFetch, exportAsPython, generateRequestDoc, type CodeGenOptions } from '../lib/curlExport';
 import { copyText } from '../lib/util';
+import { useI18n } from '../lib/i18n';
 import { IconCode, IconCopy, IconX } from './Icons';
 
 export const ExportModal: React.FC = () => {
   const { data, exportModal, setExportModal, toast } = useAppStore();
+  const { t } = useI18n();
   const [lang, setLang] = useState<'curl' | 'fetch' | 'python' | 'markdown'>('curl');
   const [secretMode, setSecretMode] = useState<CodeGenOptions['secretMode']>('mask');
   const [includeJq, setIncludeJq] = useState(true);
@@ -34,7 +36,7 @@ export const ExportModal: React.FC = () => {
         <div className="modal-head">
           <h2>
             <IconCode size={16} />
-            生成代码与文档 · {req.name}
+            {t(`生成代码与文档 · ${req.name}`, `Code & Docs · ${req.name}`)}
           </h2>
           <button className="btn btn-ghost btn-icon" onClick={() => setExportModal(null)}>
             <IconX size={16} />
@@ -54,7 +56,7 @@ export const ExportModal: React.FC = () => {
                 Python requests
               </button>
               <button className={lang === 'markdown' ? 'active' : ''} onClick={() => setLang('markdown')}>
-                Markdown 文档
+                {t('Markdown 文档', 'Markdown')}
               </button>
             </div>
 
@@ -65,9 +67,9 @@ export const ExportModal: React.FC = () => {
                   value={secretMode}
                   onChange={(e) => setSecretMode(e.target.value as CodeGenOptions['secretMode'])}
                 >
-                  <option value="mask">密钥脱敏显示（推荐）</option>
-                  <option value="template">保留 {'{{变量}}'} 占位符</option>
-                  <option value="resolve">填充真实明文密钥</option>
+                  <option value="mask">{t('密钥脱敏显示（推荐）', 'Mask secrets (recommended)')}</option>
+                  <option value="template">{t('保留 {{变量}} 占位符', 'Keep {{variable}} placeholders')}</option>
+                  <option value="resolve">{t('填充真实明文密钥', 'Include raw secret values')}</option>
                 </select>
                 {lang === 'curl' && req.responseFilter && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
@@ -77,7 +79,7 @@ export const ExportModal: React.FC = () => {
                       onChange={(e) => setIncludeJq(e.target.checked)}
                       style={{ accentColor: 'var(--accent)' }}
                     />
-                    附带 jq 管道
+                    {t('附带 jq 管道', 'Include jq pipe')}
                   </label>
                 )}
               </div>
@@ -91,21 +93,23 @@ export const ExportModal: React.FC = () => {
 
         <div className="modal-foot">
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-            {secretMode === 'resolve' && lang !== 'markdown' ? '注意：当前包含真实密钥明文，分享前请留意' : '已保护敏感密钥'}
+            {secretMode === 'resolve' && lang !== 'markdown'
+              ? t('注意：当前包含真实密钥明文，分享前请留意', 'Warning: contains raw secret values — review before sharing')
+              : t('已保护敏感密钥', 'Sensitive secrets are protected')}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={() => setExportModal(null)}>
-              关闭
+              {t('关闭', 'Close')}
             </button>
             <button
               className="btn btn-primary"
               onClick={() => {
                 copyText(output);
-                toast('已复制到剪贴板', 'success');
+                toast(t('已复制到剪贴板', 'Copied to clipboard'), 'success');
               }}
             >
               <IconCopy size={13} />
-              复制内容
+              {t('复制内容', 'Copy')}
             </button>
           </div>
         </div>

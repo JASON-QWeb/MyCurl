@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { methodColor, methodShort } from '../lib/util';
+import { useI18n } from '../lib/i18n';
 import { IconDoc, IconFolder, IconLayers, IconPlus, IconSearch, IconSettings, IconSparkles } from './Icons';
 
 interface PaletteItem {
@@ -27,6 +28,7 @@ export const CommandPalette: React.FC = () => {
     setSettingsModal,
     setDocModal,
   } = useAppStore();
+  const { lang, t } = useI18n();
 
   const [query, setQuery] = useState('');
   const [idx, setIdx] = useState(0);
@@ -46,38 +48,38 @@ export const CommandPalette: React.FC = () => {
     const actions: PaletteItem[] = [
       {
         id: 'act:import',
-        label: '粘贴 cURL 智能归档',
-        sub: '自动提取密钥、路由、请求体与 jq 筛选',
+        label: t('粘贴 cURL 智能归档', 'Paste cURL to Import'),
+        sub: t('自动提取密钥、路由、请求体与 jq 筛选', 'Auto-extract secrets, base URL, body, and jq filter'),
         icon: <IconSparkles size={14} />,
         run: () => openImportModal(),
       },
       {
         id: 'act:new-req',
-        label: '新建 HTTP 请求',
+        label: t('新建 HTTP 请求', 'New HTTP Request'),
         icon: <IconPlus size={14} />,
         run: () => createRequest(null),
       },
       {
         id: 'act:new-folder',
-        label: '新建文件夹',
+        label: t('新建文件夹', 'New Folder'),
         icon: <IconFolder size={14} />,
         run: () => createFolder(null),
       },
       {
         id: 'act:env',
-        label: '打开环境变量与密钥库',
+        label: t('打开环境变量与密钥库', 'Open Environments & Secrets'),
         icon: <IconLayers size={14} />,
         run: () => setEnvModal(true),
       },
       {
         id: 'act:docs',
-        label: '查看 / 导出工作区 Markdown 文档',
+        label: t('查看 / 导出工作区 Markdown 文档', 'View / Export Workspace Markdown Docs'),
         icon: <IconDoc size={14} />,
         run: () => setDocModal({ scope: 'workspace' }),
       },
       {
         id: 'act:settings',
-        label: '打开设置与数据导入导出',
+        label: t('打开设置与数据导入导出', 'Open Settings & Data'),
         icon: <IconSettings size={14} />,
         run: () => setSettingsModal(true),
       },
@@ -88,7 +90,7 @@ export const CommandPalette: React.FC = () => {
       .map((f) => ({
         id: `fld:${f.id}`,
         label: f.name,
-        sub: f.host ? `目录归档 · ${f.host}` : '文件夹文档与变量',
+        sub: f.host ? t(`目录归档 · ${f.host}`, `Folder · ${f.host}`) : t('文件夹文档与变量', 'Folder docs & variables'),
         icon: <IconFolder size={14} />,
         run: () => selectFolder(f.id),
       }));
@@ -110,7 +112,7 @@ export const CommandPalette: React.FC = () => {
     return all
       .filter((it) => it.label.toLowerCase().includes(q) || (it.sub && it.sub.toLowerCase().includes(q)))
       .slice(0, 24);
-  }, [data, wsId, query]);
+  }, [data, wsId, query, lang]);
 
   if (!commandPalette) return null;
 
@@ -132,7 +134,7 @@ export const CommandPalette: React.FC = () => {
           <IconSearch size={15} />
           <input
             ref={inputRef}
-            placeholder="搜索请求、文件夹、或执行操作…"
+            placeholder={t('搜索请求、文件夹、或执行操作…', 'Search requests, folders, or actions…')}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -158,7 +160,9 @@ export const CommandPalette: React.FC = () => {
 
         <div className="cmd-list">
           {items.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>未找到匹配项</div>
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+              {t('未找到匹配项', 'No matching results')}
+            </div>
           ) : (
             items.map((it, i) => (
               <div

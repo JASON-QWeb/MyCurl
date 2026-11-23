@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../lib/i18n';
 import {
   IconCheck,
   IconChevronDown,
@@ -38,6 +39,7 @@ export const TopBar: React.FC = () => {
     confirm,
     prompt,
   } = useAppStore();
+  const { t } = useI18n();
 
   const [openMenu, setOpenMenu] = useState<'ws' | 'env' | null>(null);
   const [newWsName, setNewWsName] = useState('');
@@ -80,7 +82,7 @@ export const TopBar: React.FC = () => {
   return (
     <header className="topbar" data-tauri-drag-region>
       <div className="topbar-left">
-        <div className="brand" title="MyCurl — 中文本地优先 API 调试与 cURL 归档工具">
+        <div className="brand" title={t('MyCurl — 本地优先 API 调试与 cURL 归档工具', 'MyCurl — Local-first API Client & cURL Organizer')}>
           <img
             src="./icon.png"
             alt="MyCurl"
@@ -99,14 +101,14 @@ export const TopBar: React.FC = () => {
             <button
               className="btn btn-ghost"
               onClick={() => setOpenMenu(openMenu === 'ws' ? null : 'ws')}
-              title="切换或新建工作区"
+              title={t('切换或新建工作区', 'Switch or create workspace')}
             >
               <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeWs.name}</span>
               <IconChevronDown size={13} />
             </button>
             {openMenu === 'ws' && (
               <div className="menu-pop" style={{ minWidth: 230 }}>
-                <div className="menu-title">工作区</div>
+                <div className="menu-title">{t('工作区', 'Workspaces')}</div>
                 {data.workspaces.map((w) => (
                   <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <button
@@ -122,14 +124,17 @@ export const TopBar: React.FC = () => {
                     {data.workspaces.length > 1 && (
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
-                        title="删除工作区"
+                        title={t('删除工作区', 'Delete workspace')}
                         onClick={async (e) => {
                           e.stopPropagation();
                           setOpenMenu(null);
                           const ok = await confirm({
-                            title: '删除工作区',
-                            message: `确定删除工作区「${w.name}」及其中的所有目录、请求和环境变量吗？此操作无法撤销。`,
-                            confirmLabel: '删除',
+                            title: t('删除工作区', 'Delete Workspace'),
+                            message: t(
+                              `确定删除工作区「${w.name}」及其中的所有目录、请求和环境变量吗？此操作无法撤销。`,
+                              `Delete workspace "${w.name}" and all its folders, requests, and variables? This cannot be undone.`,
+                            ),
+                            confirmLabel: t('删除', 'Delete'),
                             danger: true,
                           });
                           if (ok) deleteWorkspace(w.id);
@@ -145,7 +150,7 @@ export const TopBar: React.FC = () => {
                   <input
                     className="input input-sm"
                     style={{ flex: 1, minWidth: 0 }}
-                    placeholder="新建工作区名称…"
+                    placeholder={t('新建工作区名称…', 'New workspace name…')}
                     value={newWsName}
                     onChange={(e) => setNewWsName(e.target.value)}
                     onKeyDown={(e) => {
@@ -173,15 +178,15 @@ export const TopBar: React.FC = () => {
                   onClick={async () => {
                     setOpenMenu(null);
                     const next = await prompt({
-                      title: '重命名工作区',
+                      title: t('重命名工作区', 'Rename Workspace'),
                       defaultValue: activeWs.name,
-                      placeholder: '输入新的工作区名称…',
-                      confirmLabel: '保存',
+                      placeholder: t('输入新的工作区名称…', 'Enter new workspace name…'),
+                      confirmLabel: t('保存', 'Save'),
                     });
                     if (next?.trim()) renameWorkspace(activeWs.id, next.trim());
                   }}
                 >
-                  <span>重命名当前工作区…</span>
+                  <span>{t('重命名当前工作区…', 'Rename current workspace…')}</span>
                 </button>
               </div>
             )}
@@ -192,15 +197,15 @@ export const TopBar: React.FC = () => {
             <button
               className="btn btn-ghost"
               onClick={() => setOpenMenu(openMenu === 'env' ? null : 'env')}
-              title="切换运行环境（控制开发/测试/生产等子环境变量覆盖）"
+              title={t('切换运行环境（控制开发/测试/生产等子环境变量覆盖）', 'Switch active environment')}
             >
               <span className="env-dot" style={{ background: activeEnv?.color ?? 'var(--text-muted)' }} />
-              <span>{activeEnv ? activeEnv.name : '仅全局变量'}</span>
+              <span>{activeEnv ? activeEnv.name : t('仅全局变量', 'Global Only')}</span>
               <IconChevronDown size={13} />
             </button>
             {openMenu === 'env' && (
               <div className="menu-pop" style={{ minWidth: 235 }}>
-                <div className="menu-title">运行环境</div>
+                <div className="menu-title">{t('运行环境', 'Environments')}</div>
                 <button
                   className={`menu-item ${activeEnvId === null ? 'active' : ''}`}
                   onClick={() => {
@@ -210,7 +215,7 @@ export const TopBar: React.FC = () => {
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                     <span className="env-dot" style={{ background: 'var(--text-muted)' }} />
-                    仅全局变量
+                    {t('仅全局变量', 'Global Only')}
                   </span>
                   {activeEnvId === null && <IconCheck size={13} />}
                 </button>
@@ -237,7 +242,7 @@ export const TopBar: React.FC = () => {
                 ))}
                 <div className="menu-sep" />
                 <div style={{ padding: '4px 8px 6px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  变量优先级：全局变量 &lt; 当前环境 &lt; 文件夹变量
+                  {t('变量优先级：全局变量 < 当前环境 < 文件夹变量', 'Priority: Global < Environment < Folder')}
                 </div>
                 <button
                   className="menu-item"
@@ -248,7 +253,7 @@ export const TopBar: React.FC = () => {
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <IconLayers size={13} />
-                    管理环境与密钥库…
+                    {t('管理环境与密钥库…', 'Manage Environments & Secrets…')}
                   </span>
                 </button>
               </div>
@@ -275,12 +280,12 @@ export const TopBar: React.FC = () => {
                 openImportModal(clipboardCurl);
                 dismissClipboardCurl();
               }}
-              title="点击预览并自动归档剪贴板中的 cURL"
+              title={t('点击预览并自动归档剪贴板中的 cURL', 'Click to preview and import cURL from clipboard')}
             >
               <IconClipboard size={13} />
-              <span>检测到 cURL，点击一键归档</span>
+              <span>{t('检测到 cURL，点击一键归档', 'cURL detected — Import')}</span>
             </button>
-            <button className="chip-close" onClick={dismissClipboardCurl} title="忽略">
+            <button className="chip-close" onClick={dismissClipboardCurl} title={t('忽略', 'Dismiss')}>
               <IconX size={12} />
             </button>
           </div>
@@ -290,27 +295,30 @@ export const TopBar: React.FC = () => {
         <button
           className="btn btn-soft"
           onClick={() => openImportModal()}
-          title="粘贴 AI 给出的 cURL 命令，自动收纳密钥、路由、请求体与 jq 筛选 (⌘I / ⌘⇧V)"
+          title={t(
+            '粘贴 AI 给出的 cURL 命令，自动收纳密钥、路由、请求体与 jq 筛选 (⌘I / ⌘⇧V)',
+            'Paste cURL to auto-extract secrets, base URL, body, and jq filter (⌘I / ⌘⇧V)',
+          )}
         >
           <IconSparkles size={14} />
-          <span>粘贴 cURL 智能归档</span>
+          <span>{t('粘贴 cURL 智能归档', 'Import cURL')}</span>
           <span className="kbd">⌘I</span>
         </button>
 
         {/* 命令面板 */}
-        <button className="btn btn-ghost" onClick={() => setCommandPalette(true)} title="快速跳转或搜索命令 (⌘K)">
+        <button className="btn btn-ghost" onClick={() => setCommandPalette(true)} title={t('快速跳转或搜索命令 (⌘K)', 'Command Palette (⌘K)')}>
           <IconSearch size={14} />
           <span className="kbd">⌘K</span>
         </button>
       </div>
 
       <div className="topbar-right">
-        {saving && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>保存中…</span>}
+        {saving && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('保存中…', 'Saving…')}</span>}
 
         <button
           className="btn btn-ghost btn-icon"
           onClick={() => setEnvModal(true)}
-          title="环境变量与密钥库"
+          title={t('环境变量与密钥库', 'Environments & Secrets')}
         >
           <IconLayers size={15} />
         </button>
@@ -318,7 +326,7 @@ export const TopBar: React.FC = () => {
         <button
           className="btn btn-ghost btn-icon"
           onClick={() => setDocModal({ scope: 'workspace' })}
-          title="查看 / 导出工作区 API 归档文档"
+          title={t('查看 / 导出工作区 API 归档文档', 'Workspace API Docs')}
         >
           <IconDoc size={15} />
         </button>
@@ -326,16 +334,24 @@ export const TopBar: React.FC = () => {
         <button
           className="btn btn-ghost btn-icon"
           onClick={toggleLayout}
-          title={data.settings.layout === 'horizontal' ? '切换为上下布局' : '切换为左右布局'}
+          title={
+            data.settings.layout === 'horizontal'
+              ? t('切换为上下布局', 'Switch to vertical layout')
+              : t('切换为左右布局', 'Switch to horizontal layout')
+          }
         >
           {data.settings.layout === 'horizontal' ? <IconSplit size={15} /> : <IconSplitVert size={15} />}
         </button>
 
-        <button className="btn btn-ghost btn-icon" onClick={toggleTheme} title={isDark ? '切换浅色主题' : '切换深色主题'}>
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={toggleTheme}
+          title={isDark ? t('切换浅色主题', 'Switch to light theme') : t('切换深色主题', 'Switch to dark theme')}
+        >
           {isDark ? <IconSun size={15} /> : <IconMoon size={15} />}
         </button>
 
-        <button className="btn btn-ghost btn-icon" onClick={() => setSettingsModal(true)} title="设置与导入导出">
+        <button className="btn btn-ghost btn-icon" onClick={() => setSettingsModal(true)} title={t('设置与导入导出', 'Settings & Data')}>
           <IconSettings size={15} />
         </button>
       </div>

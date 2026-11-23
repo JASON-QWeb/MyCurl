@@ -8,6 +8,7 @@ import {
   isPostmanCollection,
 } from '../lib/collectionIO';
 import { parseCurlCommands } from '../lib/curlParser';
+import { useI18n, type Language } from '../lib/i18n';
 import { IconDownload, IconSettings, IconUpload, IconX } from './Icons';
 
 export const SettingsModal: React.FC = () => {
@@ -23,6 +24,7 @@ export const SettingsModal: React.FC = () => {
     confirm,
     toast,
   } = useAppStore();
+  const { t } = useI18n();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -39,7 +41,12 @@ export const SettingsModal: React.FC = () => {
     a.download = `mycurl-backup${maskSecrets ? '-masked' : ''}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast(maskSecrets ? '已导出脱敏备份 JSON' : '已导出完整备份 JSON', 'success');
+    toast(
+      maskSecrets
+        ? t('已导出脱敏备份 JSON', 'Exported masked backup JSON')
+        : t('已导出完整备份 JSON', 'Exported full backup JSON'),
+      'success',
+    );
   };
 
   const handleFileImport = async (file: File | null) => {
@@ -50,20 +57,29 @@ export const SettingsModal: React.FC = () => {
       if (isPostmanCollection(json)) {
         const res = importPostmanCollection(data, wsId, json);
         replaceData(res.data);
-        toast(`已导入 Postman 集合：${res.folderCount} 个目录，${res.requestCount} 条请求`, 'success');
+        toast(
+          t(
+            `已导入 Postman 集合：${res.folderCount} 个目录，${res.requestCount} 条请求`,
+            `Imported Postman collection: ${res.folderCount} folders, ${res.requestCount} requests`,
+          ),
+          'success',
+        );
         setSettingsModal(false);
         return;
       }
       if (isMyCurlBackup(json)) {
         const ok = await confirm({
-          title: '恢复 MyCurl 备份',
-          message: '导入 MyCurl 备份将替换当前全部工作区数据，是否继续？',
-          confirmLabel: '继续恢复',
+          title: t('恢复 MyCurl 备份', 'Restore MyCurl Backup'),
+          message: t(
+            '导入 MyCurl 备份将替换当前全部工作区数据，是否继续？',
+            'Importing a MyCurl backup will replace all current workspace data. Continue?',
+          ),
+          confirmLabel: t('继续恢复', 'Restore'),
           danger: true,
         });
         if (!ok) return;
         replaceData(importMyCurlBackup(json));
-        toast('已恢复 MyCurl 备份数据', 'success');
+        toast(t('已恢复 MyCurl 备份数据', 'Restored MyCurl backup'), 'success');
         setSettingsModal(false);
         return;
       }
@@ -76,7 +92,13 @@ export const SettingsModal: React.FC = () => {
       setSettingsModal(false);
       return;
     }
-    toast('未识别的文件格式（支持 MyCurl JSON、Postman v2.1 JSON 或 cURL 文本文件）', 'error');
+    toast(
+      t(
+        '未识别的文件格式（支持 MyCurl JSON、Postman v2.1 JSON 或 cURL 文本文件）',
+        'Unrecognized file format (supports MyCurl JSON, Postman v2.1 JSON, or cURL text)',
+      ),
+      'error',
+    );
   };
 
   return (
@@ -90,7 +112,7 @@ export const SettingsModal: React.FC = () => {
         <div className="modal-head">
           <h2>
             <IconSettings size={16} />
-            设置与数据管理
+            {t('设置与数据管理', 'Settings & Data')}
           </h2>
           <button className="btn btn-ghost btn-icon" onClick={() => setSettingsModal(false)}>
             <IconX size={16} />
@@ -99,24 +121,37 @@ export const SettingsModal: React.FC = () => {
 
         <div className="modal-body">
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="card-title">界面外观</div>
+            <div className="card-title">{t('界面外观', 'Appearance')}</div>
             <div className="switch-row">
               <div>
-                <div>主题风格</div>
+                <div>{t('界面语言', 'Language')}</div>
+              </div>
+              <select
+                className="select select-sm"
+                value={s.language ?? 'zh'}
+                onChange={(e) => updateSettings({ language: e.target.value as Language })}
+              >
+                <option value="zh">简体中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div className="switch-row">
+              <div>
+                <div>{t('主题风格', 'Theme')}</div>
               </div>
               <select
                 className="select select-sm"
                 value={s.theme}
                 onChange={(e) => updateSettings({ theme: e.target.value as 'dark' | 'light' | 'system' })}
               >
-                <option value="dark">深色主题</option>
-                <option value="light">浅色主题</option>
-                <option value="system">跟随系统</option>
+                <option value="dark">{t('深色主题', 'Dark')}</option>
+                <option value="light">{t('浅色主题', 'Light')}</option>
+                <option value="system">{t('跟随系统', 'System')}</option>
               </select>
             </div>
             <div className="switch-row">
               <div>
-                <div>代码编辑器字号</div>
+                <div>{t('代码编辑器字号', 'Editor Font Size')}</div>
               </div>
               <input
                 className="input input-sm mono"
@@ -131,11 +166,11 @@ export const SettingsModal: React.FC = () => {
           </div>
 
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="card-title">网络请求默认配置</div>
+            <div className="card-title">{t('网络请求默认配置', 'Request Defaults')}</div>
             <div className="switch-row">
               <div>
-                <div>超时时间（毫秒）</div>
-                <small>AI 模型推理较慢时建议保持 120000 ms 以上</small>
+                <div>{t('超时时间（毫秒）', 'Timeout (ms)')}</div>
+                <small>{t('AI 模型推理较慢时建议保持 120000 ms 以上', 'Keep 120000 ms or higher for slow LLM responses')}</small>
               </div>
               <input
                 className="input input-sm mono"
@@ -147,8 +182,8 @@ export const SettingsModal: React.FC = () => {
             </div>
             <div className="switch-row">
               <div>
-                <div>默认校验 SSL 证书</div>
-                <small>关闭后可调试自签名 HTTPS 服务</small>
+                <div>{t('默认校验 SSL 证书', 'Verify SSL Certificates')}</div>
+                <small>{t('关闭后可调试自签名 HTTPS 服务', 'Disable to debug self-signed HTTPS endpoints')}</small>
               </div>
               <input
                 type="checkbox"
@@ -159,7 +194,7 @@ export const SettingsModal: React.FC = () => {
             </div>
             <div className="switch-row">
               <div>
-                <div>默认跟随重定向</div>
+                <div>{t('默认跟随重定向', 'Follow Redirects')}</div>
               </div>
               <input
                 type="checkbox"
@@ -170,8 +205,8 @@ export const SettingsModal: React.FC = () => {
             </div>
             <div className="switch-row">
               <div>
-                <div>HTTP 代理地址</div>
-                <small>留空直连，例如 http://127.0.0.1:7890</small>
+                <div>{t('HTTP 代理地址', 'HTTP Proxy')}</div>
+                <small>{t('留空直连，例如 http://127.0.0.1:7890', 'Leave empty for direct connection, e.g. http://127.0.0.1:7890')}</small>
               </div>
               <input
                 className="input input-sm mono"
@@ -184,11 +219,11 @@ export const SettingsModal: React.FC = () => {
           </div>
 
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="card-title">cURL 智能归档默认行为</div>
+            <div className="card-title">{t('cURL 智能归档默认行为', 'cURL Smart Import Defaults')}</div>
             <div className="switch-row">
               <div>
-                <div>自动收纳密钥为文件夹变量</div>
-                <small>识别 Bearer Token、x-api-key、查询参数 key 等敏感信息</small>
+                <div>{t('自动收纳密钥为文件夹变量', 'Extract Secrets to Folder Variables')}</div>
+                <small>{t('识别 Bearer Token、x-api-key、查询参数 key 等敏感信息', 'Detects Bearer tokens, x-api-key, query keys, etc.')}</small>
               </div>
               <input
                 type="checkbox"
@@ -199,8 +234,8 @@ export const SettingsModal: React.FC = () => {
             </div>
             <div className="switch-row">
               <div>
-                <div>自动提取 Base URL 路由前缀</div>
-                <small>如 https://app.ppapi.us/v1 → {'{{base_url}}'}</small>
+                <div>{t('自动提取 Base URL 路由前缀', 'Extract Base URL Prefix')}</div>
+                <small>{t('如 https://app.ppapi.us/v1 → {{base_url}}', 'e.g. https://app.ppapi.us/v1 → {{base_url}}')}</small>
               </div>
               <input
                 type="checkbox"
@@ -211,8 +246,8 @@ export const SettingsModal: React.FC = () => {
             </div>
             <div className="switch-row">
               <div>
-                <div>按域名自动归档到文件夹</div>
-                <small>同一域名下的多个接口自动归入同一目录，共享变量与文档</small>
+                <div>{t('按域名自动归档到文件夹', 'Group into Folders by Host')}</div>
+                <small>{t('同一域名下的多个接口自动归入同一目录，共享变量与文档', 'Requests on the same host share a folder, variables, and docs')}</small>
               </div>
               <input
                 type="checkbox"
@@ -224,12 +259,13 @@ export const SettingsModal: React.FC = () => {
           </div>
 
           <div className="card">
-            <div className="card-title">本地存储与导入 / 导出</div>
+            <div className="card-title">{t('本地存储与导入 / 导出', 'Local Storage & Import / Export')}</div>
             <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10 }}>
-              本地数据目录：<code className="mono">{serverInfo?.dataDir ?? '浏览器 localStorage'}</code>
+              {t('本地数据目录：', 'Data directory: ')}
+              <code className="mono">{serverInfo?.dataDir ?? t('浏览器 localStorage', 'Browser localStorage')}</code>
               {serverInfo && (
                 <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>
-                  （MyCurl v{serverInfo.version} · {serverInfo.runtime === 'rust-tauri' ? `Rust Tauri (${serverInfo.platform}/${serverInfo.arch})` : `Node ${serverInfo.node}`}）
+                  (MyCurl v{serverInfo.version} · {serverInfo.runtime === 'rust-tauri' ? `Rust Tauri (${serverInfo.platform}/${serverInfo.arch})` : `Node ${serverInfo.node}`})
                 </span>
               )}
             </div>
@@ -246,24 +282,26 @@ export const SettingsModal: React.FC = () => {
               />
               <button className="btn" onClick={() => fileInputRef.current?.click()}>
                 <IconUpload size={13} />
-                导入 Postman / 备份 / cURL 文件
+                {t('导入 Postman / 备份 / cURL 文件', 'Import Postman / Backup / cURL')}
               </button>
               <button className="btn" onClick={() => downloadJson(true)}>
                 <IconDownload size={13} />
-                导出备份（密钥脱敏）
+                {t('导出备份（密钥脱敏）', 'Export Backup (Masked)')}
               </button>
               <button className="btn" onClick={() => downloadJson(false)}>
                 <IconDownload size={13} />
-                导出完整备份（含密钥）
+                {t('导出完整备份（含密钥）', 'Export Full Backup')}
               </button>
             </div>
           </div>
         </div>
 
         <div className="modal-foot">
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>离线优先 · 零云端上传 · 数据自动备份</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+            {t('离线优先 · 零云端上传 · 数据自动备份', 'Offline-first · Zero cloud sync · Local auto-backup')}
+          </span>
           <button className="btn btn-primary" onClick={() => setSettingsModal(false)}>
-            完成
+            {t('完成', 'Done')}
           </button>
         </div>
       </div>

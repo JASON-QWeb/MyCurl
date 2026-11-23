@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../lib/i18n';
 import { IconX } from './Icons';
 
 export const ConfirmDialog: React.FC = () => {
   const { dialog, closeDialog } = useAppStore();
+  const { t } = useI18n();
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
@@ -61,7 +63,7 @@ export const ConfirmDialog: React.FC = () => {
       <div className="modal modal-sm" role="dialog" aria-modal="true">
         <div className="modal-head">
           <h2>{dialog.title}</h2>
-          <button className="btn btn-ghost btn-icon" onClick={handleCancel} title="关闭">
+          <button className="btn btn-ghost btn-icon" onClick={handleCancel} title={t('关闭', 'Close')}>
             <IconX size={16} />
           </button>
         </div>
@@ -94,7 +96,7 @@ export const ConfirmDialog: React.FC = () => {
           <div />
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={handleCancel}>
-              {dialog.cancelLabel ?? '取消'}
+              {dialog.cancelLabel ?? t('取消', 'Cancel')}
             </button>
             <button
               ref={confirmBtnRef}
@@ -102,7 +104,7 @@ export const ConfirmDialog: React.FC = () => {
               onClick={handleConfirm}
               disabled={dialog.kind === 'prompt' && !inputValue.trim()}
             >
-              {dialog.confirmLabel ?? '确定'}
+              {dialog.confirmLabel ?? t('确定', 'Confirm')}
             </button>
           </div>
         </div>

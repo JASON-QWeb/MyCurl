@@ -2,6 +2,7 @@ import React from 'react';
 import type { KV } from '../lib/types';
 import type { VarMap } from '../lib/template';
 import { kv } from '../lib/util';
+import { useI18n } from '../lib/i18n';
 import { TemplateInput } from './TemplateInput';
 import { IconPlus, IconTrash } from './Icons';
 
@@ -19,12 +20,16 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
   items,
   onChange,
   vars,
-  keyPlaceholder = '键名',
-  valuePlaceholder = '值（支持 {{变量}}）',
-  addLabel = '添加一行',
+  keyPlaceholder,
+  valuePlaceholder,
+  addLabel,
   keySuggestions,
 }) => {
-  const listId = keySuggestions ? 'kv-suggestions-' + keyPlaceholder : undefined;
+  const { t } = useI18n();
+  const finalKeyPlaceholder = keyPlaceholder ?? t('键名', 'Key');
+  const finalValuePlaceholder = valuePlaceholder ?? t('值（支持 {{变量}}）', 'Value (supports {{var}})');
+  const finalAddLabel = addLabel ?? t('添加一行', 'Add Row');
+  const listId = keySuggestions ? 'kv-suggestions-' + finalKeyPlaceholder : undefined;
 
   const update = (id: string, patch: Partial<KV>) => {
     onChange(items.map((x) => (x.id === id ? { ...x, ...patch } : x)));
@@ -51,8 +56,8 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
         <thead>
           <tr>
             <th className="kv-check" />
-            <th style={{ width: '36%' }}>名称</th>
-            <th>值</th>
+            <th style={{ width: '36%' }}>{t('名称', 'Name')}</th>
+            <th>{t('值', 'Value')}</th>
             <th className="kv-del" />
           </tr>
         </thead>
@@ -64,7 +69,7 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
                   type="checkbox"
                   checked={row.enabled}
                   onChange={(e) => update(row.id, { enabled: e.target.checked })}
-                  title="启用/禁用"
+                  title={t('启用/禁用', 'Enable/Disable')}
                 />
               </td>
               <td>
@@ -73,7 +78,7 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
                   style={{ width: '100%' }}
                   list={listId}
                   value={row.key}
-                  placeholder={keyPlaceholder}
+                  placeholder={finalKeyPlaceholder}
                   onChange={(e) => update(row.id, { key: e.target.value })}
                 />
               </td>
@@ -82,13 +87,13 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
                   value={row.value}
                   onChange={(v) => update(row.id, { value: v })}
                   vars={vars}
-                  placeholder={valuePlaceholder}
+                  placeholder={finalValuePlaceholder}
                   bordered
                   compact
                 />
               </td>
               <td className="kv-del">
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => remove(row.id)} title="删除">
+                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => remove(row.id)} title={t('删除', 'Delete')}>
                   <IconTrash size={13} />
                 </button>
               </td>
@@ -99,7 +104,7 @@ export const KeyValueTable: React.FC<KeyValueTableProps> = ({
       <div style={{ marginTop: 8 }}>
         <button className="btn btn-sm" onClick={add}>
           <IconPlus size={13} />
-          {addLabel}
+          {finalAddLabel}
         </button>
       </div>
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { looksLikeCurl } from './lib/curlParser';
 import { isMacOS, isTauri, readClipboardNative } from './lib/bridge';
+import { useI18n } from './lib/i18n';
 import { clamp } from './lib/util';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -65,13 +66,15 @@ export const App: React.FC = () => {
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
+  const { lang, t } = useI18n();
   const isDark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && sysDark);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('lang', lang === 'en' ? 'en' : 'zh-CN');
     if (isTauri() && isMacOS()) {
       document.documentElement.setAttribute('data-macos-overlay', 'true');
     }
-  }, [isDark]);
+  }, [isDark, lang]);
 
   // 全局快捷键 + 非输入框粘贴 cURL 自动触发归档
   useEffect(() => {
@@ -201,19 +204,28 @@ export const App: React.FC = () => {
         ) : (
           <div className="empty-state">
             <IconSparkles size={32} />
-            <h3>欢迎使用 MyCurl</h3>
+            <h3>{t('欢迎使用 MyCurl', 'Welcome to MyCurl')}</h3>
             <p>
-              直接复制 AI 给你的 cURL 命令并按 <span className="kbd">⌘V</span> 或点击下方按钮，MyCurl 会自动收纳密钥、路由前缀、请求体与{' '}
-              <code>jq</code> 筛选表达式并归档为文档。
+              {t(
+                '直接复制 AI 给你的 cURL 命令并按 ',
+                'Copy any cURL command and press ',
+              )}
+              <span className="kbd">⌘V</span>
+              {t(
+                ' 或点击下方按钮，MyCurl 会自动收纳密钥、路由前缀、请求体与 ',
+                ' or click below. MyCurl automatically extracts secrets, base URLs, bodies, and ',
+              )}
+              <code>jq</code>
+              {t(' 筛选表达式并归档为文档。', ' filters into organized collections.')}
             </p>
             <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
               <button className="btn btn-primary" onClick={() => openImportModal()}>
                 <IconSparkles size={14} />
-                粘贴 cURL 智能归档
+                {t('粘贴 cURL 智能归档', 'Paste cURL to Import')}
               </button>
               <button className="btn" onClick={() => createRequest(null)}>
                 <IconPlus size={14} />
-                新建空白请求
+                {t('新建空白请求', 'New Request')}
               </button>
             </div>
           </div>

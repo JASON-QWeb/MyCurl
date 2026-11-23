@@ -3,6 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import type { Folder, HttpRequest } from '../lib/types';
 import { copyText, methodColor, methodShort } from '../lib/util';
 import { exportAsCurl } from '../lib/curlExport';
+import { useI18n } from '../lib/i18n';
 import {
   IconChevronDown,
   IconChevronRight,
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     confirm,
     toast,
   } = useAppStore();
+  const { t } = useI18n();
 
   const [ctx, setCtx] = useState<CtxMenuState | null>(null);
   const [dragReqId, setDragReqId] = useState<string | null>(null);
@@ -95,9 +97,12 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
 
   const handleDeleteFolder = async (f: Folder) => {
     const ok = await confirm({
-      title: '删除文件夹',
-      message: `确定删除文件夹「${f.name}」及其中的所有子目录和请求吗？此操作无法撤销。`,
-      confirmLabel: '删除',
+      title: t('删除文件夹', 'Delete Folder'),
+      message: t(
+        `确定删除文件夹「${f.name}」及其中的所有子目录和请求吗？此操作无法撤销。`,
+        `Delete folder "${f.name}" and all its subfolders and requests? This cannot be undone.`,
+      ),
+      confirmLabel: t('删除', 'Delete'),
       danger: true,
     });
     if (ok) deleteFolder(f.id);
@@ -105,10 +110,10 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
 
   const commitRename = () => {
     if (!renaming) return;
-    const t = renaming.text.trim();
-    if (t) {
-      if (renaming.kind === 'folder') updateFolder(renaming.id, { name: t });
-      else updateRequest(renaming.id, { name: t });
+    const text = renaming.text.trim();
+    if (text) {
+      if (renaming.kind === 'folder') updateFolder(renaming.id, { name: text });
+      else updateRequest(renaming.id, { name: text });
     }
     setRenaming(null);
   };
@@ -156,23 +161,23 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
           />
         ) : (
           <span className="tree-label" title={`${r.method} ${r.url}`}>
-            {r.name || '未命名请求'}
+            {r.name || t('未命名请求', 'Untitled Request')}
           </span>
         )}
         <div className="tree-hover-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn btn-ghost btn-icon btn-sm"
-            title="复制为 cURL（脱敏）"
+            title={t('复制为 cURL（脱敏）', 'Copy as cURL (masked)')}
             onClick={() => {
               copyText(exportAsCurl(data, r, { secretMode: 'mask', includeJq: true }));
-              toast('已复制 cURL 命令（密钥已脱敏）', 'success');
+              toast(t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'), 'success');
             }}
           >
             <IconCopy size={12} />
           </button>
           <button
             className="btn btn-ghost btn-icon btn-sm"
-            title="删除请求"
+            title={t('删除请求', 'Delete request')}
             onClick={() => deleteRequest(r.id)}
           >
             <IconTrash size={12} />
@@ -235,13 +240,13 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               }}
             />
           ) : (
-            <span className="tree-label" title={f.host ? `站点归档：${f.host}` : f.name}>
+            <span className="tree-label" title={f.host ? t(`站点归档：${f.host}`, `Host: ${f.host}`) : f.name}>
               {f.name}
             </span>
           )}
           <div className="tree-meta">
             {secretCount > 0 && (
-              <span className="key-badge tree-badge-hide" title={`已收纳 ${secretCount} 个密钥变量`}>
+              <span className="key-badge tree-badge-hide" title={t(`已收纳 ${secretCount} 个密钥变量`, `${secretCount} secret variable(s)`)}>
                 <IconKey size={10} />
                 {secretCount}
               </span>
@@ -249,21 +254,21 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
             <div className="tree-hover-actions" onClick={(e) => e.stopPropagation()}>
               <button
                 className="btn btn-ghost btn-icon btn-sm"
-                title="查看文件夹归档文档与密钥变量"
+                title={t('查看文件夹归档文档与密钥变量', 'Open folder docs & secrets')}
                 onClick={() => selectFolder(f.id)}
               >
                 <IconDoc size={12} />
               </button>
               <button
                 className="btn btn-ghost btn-icon btn-sm"
-                title="在此文件夹中新建请求"
+                title={t('在此文件夹中新建请求', 'New request in folder')}
                 onClick={() => createRequest(f.id)}
               >
                 <IconPlus size={12} />
               </button>
               <button
                 className="btn btn-ghost btn-icon btn-sm"
-                title="删除文件夹"
+                title={t('删除文件夹', 'Delete folder')}
                 onClick={() => handleDeleteFolder(f)}
               >
                 <IconTrash size={12} />
@@ -293,7 +298,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         <div className="sidebar-search">
           <IconSearch size={13} />
           <input
-            placeholder="筛选接口、域名、路径…"
+            placeholder={t('筛选接口、域名、路径…', 'Filter requests, hosts, paths…')}
             value={sidebarFilter}
             onChange={(e) => setSidebarFilter(e.target.value)}
           />
@@ -304,15 +309,19 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
           )}
         </div>
         <div className="sidebar-actions">
-          <button className="btn" onClick={() => createRequest(selection?.kind === 'folder' ? selection.id : null)} title="新建 HTTP 请求 (⌘N)">
+          <button
+            className="btn"
+            onClick={() => createRequest(selection?.kind === 'folder' ? selection.id : null)}
+            title={t('新建 HTTP 请求 (⌘N)', 'New HTTP Request (⌘N)')}
+          >
             <IconPlus size={12} />
-            请求
+            {t('请求', 'Request')}
           </button>
-          <button className="btn" onClick={() => createFolder(null)} title="新建文件夹">
+          <button className="btn" onClick={() => createFolder(null)} title={t('新建文件夹', 'New Folder')}>
             <IconFolder size={12} />
-            文件夹
+            {t('文件夹', 'Folder')}
           </button>
-          <button className="btn btn-soft" onClick={() => openImportModal()} title="粘贴 cURL 智能归档">
+          <button className="btn btn-soft" onClick={() => openImportModal()} title={t('粘贴 cURL 智能归档', 'Paste cURL to Import')}>
             <IconSparkles size={12} />
             cURL
           </button>
@@ -336,17 +345,24 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         {rootReqs.map((r) => renderRequestRow(r, 0))}
         {topFolders.length === 0 && rootReqs.length === 0 && (
           <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            还没有接口，点击上方「cURL」直接粘贴 AI 给的指令即可自动归档。
+            {t(
+              '还没有接口，点击上方「cURL」直接粘贴 AI 给的指令即可自动归档。',
+              'No requests yet. Click "cURL" above to paste and auto-organize a cURL command.',
+            )}
           </div>
         )}
       </div>
 
       <div className="sidebar-footer">
         <span>
-          {folders.length} 目录 · {requests.length} 请求
+          {t(`${folders.length} 目录 · ${requests.length} 请求`, `${folders.length} folders · ${requests.length} requests`)}
         </span>
-        <span title={serverInfo?.dataDir || '本地存储'}>
-          {serverInfo?.runtime === 'rust-tauri' ? 'Rust 内核 ✓' : serverInfo ? '本地存储 ✓' : '浏览器模式'}
+        <span title={serverInfo?.dataDir || t('本地存储', 'Local Storage')}>
+          {serverInfo?.runtime === 'rust-tauri'
+            ? t('Rust 内核 ✓', 'Rust Core ✓')
+            : serverInfo
+              ? t('本地存储 ✓', 'Local ✓')
+              : t('浏览器模式', 'Browser')}
         </span>
       </div>
 
@@ -372,20 +388,20 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconSend size={13} />
-                  立即发送
+                  {t('立即发送', 'Send Now')}
                 </span>
               </button>
               <button
                 className="menu-item"
                 onClick={() => {
                   copyText(exportAsCurl(data, ctxReq, { secretMode: 'mask', includeJq: true }));
-                  toast('已复制为 cURL（密钥已脱敏）', 'success');
+                  toast(t('已复制为 cURL（密钥已脱敏）', 'Copied as cURL (secrets masked)'), 'success');
                   setCtx(null);
                 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconCopy size={13} />
-                  复制为 cURL
+                  {t('复制为 cURL', 'Copy as cURL')}
                 </span>
               </button>
               <button
@@ -397,7 +413,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconDoc size={13} />
-                  导出代码 / 文档…
+                  {t('导出代码 / 文档…', 'Export Code / Docs…')}
                 </span>
               </button>
               <div className="menu-sep" />
@@ -408,7 +424,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                   setCtx(null);
                 }}
               >
-                <span>复制请求</span>
+                <span>{t('复制请求', 'Duplicate')}</span>
               </button>
               <button
                 className="menu-item"
@@ -419,7 +435,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconEdit size={13} />
-                  重命名
+                  {t('重命名', 'Rename')}
                 </span>
               </button>
               {ctxReq.folderId && (
@@ -430,7 +446,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                     setCtx(null);
                   }}
                 >
-                  <span>移至根目录</span>
+                  <span>{t('移至根目录', 'Move to Root')}</span>
                 </button>
               )}
               <div className="menu-sep" />
@@ -443,7 +459,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconTrash size={13} />
-                  删除请求
+                  {t('删除请求', 'Delete Request')}
                 </span>
               </button>
             </>
@@ -459,7 +475,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconDoc size={13} />
-                  打开归档文档与密钥
+                  {t('打开归档文档与密钥', 'Open Docs & Secrets')}
                 </span>
               </button>
               <button
@@ -469,7 +485,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                   setCtx(null);
                 }}
               >
-                <span>导出 Markdown 文档…</span>
+                <span>{t('导出 Markdown 文档…', 'Export Markdown Docs…')}</span>
               </button>
               <div className="menu-sep" />
               <button
@@ -481,17 +497,17 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconPlus size={13} />
-                  新建请求
+                  {t('新建请求', 'New Request')}
                 </span>
               </button>
               <button
                 className="menu-item"
                 onClick={() => {
-                  createFolder(ctxFolder.id, '子文件夹');
+                  createFolder(ctxFolder.id, t('子文件夹', 'Subfolder'));
                   setCtx(null);
                 }}
               >
-                <span>新建子文件夹</span>
+                <span>{t('新建子文件夹', 'New Subfolder')}</span>
               </button>
               <button
                 className="menu-item"
@@ -502,7 +518,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconEdit size={13} />
-                  重命名
+                  {t('重命名', 'Rename')}
                 </span>
               </button>
               <div className="menu-sep" />
@@ -516,7 +532,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <IconTrash size={13} />
-                  删除文件夹
+                  {t('删除文件夹', 'Delete Folder')}
                 </span>
               </button>
             </>

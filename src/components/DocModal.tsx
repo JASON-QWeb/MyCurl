@@ -2,11 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { generateFolderDoc, generateWorkspaceDoc } from '../lib/curlExport';
 import { copyText } from '../lib/util';
+import { useI18n } from '../lib/i18n';
 import { MarkdownView } from './MarkdownView';
 import { IconCopy, IconDoc, IconDownload, IconX } from './Icons';
 
 export const DocModal: React.FC = () => {
   const { data, docModal, setDocModal, toast } = useAppStore();
+  const { t } = useI18n();
   const [view, setView] = useState<'preview' | 'raw'>('preview');
 
   const wsId = data.settings.activeWorkspaceId || data.workspaces[0].id;
@@ -20,7 +22,7 @@ export const DocModal: React.FC = () => {
 
   if (!docModal) return null;
 
-  const title = folder ? `目录归档文档 · ${folder.name}` : '工作区 API 归档文档';
+  const title = folder ? t(`目录归档文档 · ${folder.name}`, `Folder Docs · ${folder.name}`) : t('工作区 API 归档文档', 'Workspace API Docs');
 
   const download = () => {
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
@@ -30,7 +32,7 @@ export const DocModal: React.FC = () => {
     a.download = `${slug}.md`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('已下载 Markdown 文档', 'success');
+    toast(t('已下载 Markdown 文档', 'Downloaded Markdown docs'), 'success');
   };
 
   return (
@@ -49,10 +51,10 @@ export const DocModal: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="segmented">
               <button className={view === 'preview' ? 'active' : ''} onClick={() => setView('preview')}>
-                渲染预览
+                {t('渲染预览', 'Preview')}
               </button>
               <button className={view === 'raw' ? 'active' : ''} onClick={() => setView('raw')}>
-                Markdown 源码
+                {t('Markdown 源码', 'Raw Markdown')}
               </button>
             </div>
             <button className="btn btn-ghost btn-icon" onClick={() => setDocModal(null)}>
@@ -72,21 +74,23 @@ export const DocModal: React.FC = () => {
         </div>
 
         <div className="modal-foot">
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>所有密钥字段均已自动脱敏，可安全分享给团队</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+            {t('所有密钥字段均已自动脱敏，可安全分享给团队', 'All secrets are automatically masked for safe sharing')}
+          </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="btn"
               onClick={() => {
                 copyText(md);
-                toast('已复制 Markdown 文档', 'success');
+                toast(t('已复制 Markdown 文档', 'Copied Markdown docs'), 'success');
               }}
             >
               <IconCopy size={13} />
-              复制 Markdown
+              {t('复制 Markdown', 'Copy Markdown')}
             </button>
             <button className="btn btn-primary" onClick={download}>
               <IconDownload size={13} />
-              下载 .md 文件
+              {t('下载 .md 文件', 'Download .md')}
             </button>
           </div>
         </div>
