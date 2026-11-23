@@ -526,26 +526,91 @@ function safeDecode(s: string): string {
   }
 }
 
-/** 尽量把 JSON 格式化为 2 空格缩进；含大整数时只做去缩进，避免精度丢失 */
+/** 尽量把 JSON 格式化为 2 空格缩进；含大整数时按词法排版，既美化缩进又避免精度丢失 */
 export function prettyJson(text: string): string | null {
   const t = text.trim();
   if (!t || (t[0] !== '{' && t[0] !== '[')) return null;
   try {
     const v = JSON.parse(t);
-    if (/(?<![\w.])\d{16,}/.test(t)) return dedent(t);
+    if (/(?<![\w.])\d{16,}/.test(t)) return formatJsonTokens(t);
     return JSON.stringify(v, null, 2);
   } catch {
     return null;
   }
 }
 
-function dedent(text: string): string {
-  const lines = text.split('\n');
-  if (lines.length <= 1) return text;
-  const rest = lines.slice(1).filter((l) => l.trim());
-  const min = Math.min(...rest.map((l) => /^\s*/.exec(l)![0].length));
-  if (!isFinite(min) || min === 0) return text;
-  return [lines[0], ...lines.slice(1).map((l) => l.slice(Math.min(min, /^\s*/.exec(l)![0].length)))].join('\n');
+/** 对已通过 JSON.parse 校验的合法 JSON 做词法级 2 空格美化，原样保留大整数与字符串字面量 */
+function formatJsonTokens(t: string): string {
+  const out: string[] = [];
+  const len = t.length;
+  let depth = 0;
+  let i = 0;
+
+  const skipWs = (pos: number): number => {
+    while (pos < len) {
+      const c = t.charCodeAt(pos);
+      if (c === 32 || c === 9 || c === 10 || c === 13) pos++;
+      else break;
+    }
+    return pos;
+  };
+
+  while (i < len) {
+    i = skipWs(i);
+    if (i >= len) break;
+    const ch = t[i];
+
+    if (ch === '"') {
+      const start = i;
+      i++;
+      while (i < len) {
+        const c = t[i];
+        if (c === '\\') {
+          i += 2;
+        } else if (c === '"') {
+          i++;
+          break;
+        } else {
+          i++;
+        }
+      }
+      out.push(t.slice(start, i));
+    } else if (ch === '{' || ch === '[') {
+      const close = ch === '{' ? '}' : ']';
+      const next = skipWs(i + 1);
+      if (next < len && t[next] === close) {
+        out.push(ch + close);
+        i = next + 1;
+      } else {
+        depth++;
+        out.push(ch + '\n' + '  '.repeat(depth));
+        i++;
+      }
+    } else if (ch === '}' || ch === ']') {
+      depth = Math.max(0, depth - 1);
+      out.push('\n' + '  '.repeat(depth) + ch);
+      i++;
+    } else if (ch === ',') {
+      out.push(',\n' + '  '.repeat(depth));
+      i++;
+    } else if (ch === ':') {
+      out.push(': ');
+      i++;
+    } else {
+      const start = i;
+      i++;
+      while (i < len) {
+        const c = t[i];
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ',' || c === '}' || c === ']' || c === ':' || c === '{' || c === '[' || c === '"') {
+          break;
+        }
+        i++;
+      }
+      out.push(t.slice(start, i));
+    }
+  }
+
+  return out.join('');
 }
 
 function looksLikeForm(text: string): boolean {

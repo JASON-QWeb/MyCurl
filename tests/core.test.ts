@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCurl, parseCurlCommands, looksLikeCurl } from '../src/lib/curlParser';
+import { parseCurl, parseCurlCommands, looksLikeCurl, prettyJson } from '../src/lib/curlParser';
 import { applyImport, importAll, planImport } from '../src/lib/curlImport';
 import { seedData } from '../src/lib/factory';
 import { renderTemplate, resolveVariables } from '../src/lib/template';
@@ -190,5 +190,35 @@ describe('jq 筛选', () => {
     expect(runFilter('{first: .data[0].id, n: (.data|length)}', resp)).toEqual([{ first: 'a', n: 2 }]);
     expect(runFilter('$.data[*].id', resp)).toEqual(['a', 'b']);
     expect(formatFilterOutput(runFilter('.data[].id', resp))).toBe('a\nb');
+  });
+});
+
+describe('prettyJson 响应体美化', () => {
+  it('普通单行 JSON 自动格式化为 2 空格缩进', () => {
+    expect(prettyJson('{"code":200,"data":{"items":[],"meta":{}}}')).toBe(
+      '{\n  "code": 200,\n  "data": {\n    "items": [],\n    "meta": {}\n  }\n}',
+    );
+  });
+
+  it('含 16 位以上大整数时仍正常美化且不丢失精度', () => {
+    const raw = '{"id":1234567890123456789,"neg":-9007199254740993,"items":[{"ok":true,"empty":[]}]}';
+    const formatted = prettyJson(raw);
+    expect(formatted).toBe(
+      '{\n  "id": 1234567890123456789,\n  "neg": -9007199254740993,\n  "items": [\n    {\n      "ok": true,\n      "empty": []\n    }\n  ]\n}',
+    );
+  });
+
+  it('字符串中含 16 位以上数字与转义字符时正常美化且不损坏内容', () => {
+    const raw = '{"orderNo":"20261123000012345678","note":"a\\":\\"b\\\\","tags":["x:1","[y]"]}';
+    const formatted = prettyJson(raw);
+    expect(formatted).toBe(
+      '{\n  "orderNo": "20261123000012345678",\n  "note": "a\\":\\"b\\\\",\n  "tags": [\n    "x:1",\n    "[y]"\n  ]\n}',
+    );
+    expect(JSON.parse(formatted!)).toEqual(JSON.parse(raw));
+  });
+
+  it('非 JSON 文本返回 null', () => {
+    expect(prettyJson('not json')).toBeNull();
+    expect(prettyJson('{"broken":')).toBeNull();
   });
 });
