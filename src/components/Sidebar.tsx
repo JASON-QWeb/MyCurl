@@ -42,6 +42,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     toggleFolder,
     createFolder,
     updateFolder,
+    moveFolder,
     deleteFolder,
     createRequest,
     updateRequest,
@@ -58,9 +59,28 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
   const { t } = useI18n();
 
   const [ctx, setCtx] = useState<CtxMenuState | null>(null);
-  const [dragReqId, setDragReqId] = useState<string | null>(null);
+  const [dragItem, setDragItem] = useState<{ kind: 'request' | 'folder'; id: string } | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'request' | 'folder'; id: string; text: string } | null>(null);
+
+  const curlSecretMode = data.settings.curlCopySecretMode ?? 'mask';
+  const copyCurlTitle =
+    curlSecretMode === 'resolve'
+      ? t('复制为 cURL（含明文密钥）', 'Copy as cURL (raw secrets)')
+      : curlSecretMode === 'template'
+        ? t('复制为 cURL（保留 {{变量}}）', 'Copy as cURL (keep {{variables}})')
+        : t('复制为 cURL（脱敏）', 'Copy as cURL (masked)');
+  const copyRequestAsCurl = (r: HttpRequest) => {
+    copyText(exportAsCurl(data, r, { secretMode: curlSecretMode, includeJq: true }));
+    toast(
+      curlSecretMode === 'resolve'
+        ? t('已复制 cURL 命令（含明文密钥）', 'Copied cURL (raw secrets included)')
+        : curlSecretMode === 'template'
+          ? t('已复制 cURL 命令（保留 {{变量}}）', 'Copied cURL (with {{variables}})')
+          : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
+      'success',
+    );
+  };
 
   useEffect(() => {
     const close = () => setCtx(null);
@@ -118,6 +138,26 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     setRenaming(null);
   };
 
+  const canDropIntoFolder = (targetId: string): boolean => {
+    if (!dragItem) return false;
+    if (dragItem.kind === 'request') {
+      const req = requests.find((r) => r.id === dragItem.id);
+      return !!req && req.folderId !== targetId;
+    }
+    if (dragItem.id === targetId) return false;
+    const dragged = folders.find((f) => f.id === dragItem.id);
+    if (!dragged || dragged.parentId === targetId) return false;
+    // 防止拖入自己的子孙目录
+    let cur: string | null = targetId;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === dragItem.id) return false;
+      seen.add(cur);
+      cur = folders.find((f) => f.id === cur)?.parentId ?? null;
+    }
+    return true;
+  };
+
   const renderRequestRow = (r: HttpRequest, depth: number) => {
     const active = selection?.kind === 'request' && selection.id === r.id;
     const isRenaming = renaming?.kind === 'request' && renaming.id === r.id;
@@ -126,13 +166,15 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         key={r.id}
         className={`tree-row ${active ? 'active' : ''}`}
         style={{ paddingLeft: 10 + depth * 15 }}
-        draggable
+        draggable={!isRenaming}
         onDragStart={(e) => {
-          setDragReqId(r.id);
+          e.stopPropagation();
+          setDragItem({ kind: 'request', id: r.id });
           e.dataTransfer.setData('text/plain', r.id);
+          e.dataTransfer.effectAllowed = 'move';
         }}
         onDragEnd={() => {
-          setDragReqId(null);
+          setDragItem(null);
           setDragOverId(null);
         }}
         onClick={() => selectRequest(r.id)}
@@ -167,11 +209,8 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         <div className="tree-hover-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn btn-ghost btn-icon btn-sm"
-            title={t('复制为 cURL（脱敏）', 'Copy as cURL (masked)')}
-            onClick={() => {
-              copyText(exportAsCurl(data, r, { secretMode: 'mask', includeJq: true }));
-              toast(t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'), 'success');
-            }}
+            title={copyCurlTitle}
+            onClick={() => copyRequestAsCurl(r)}
           >
             <IconCopy size={12} />
           </button>
@@ -201,17 +240,36 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         <div
           className={`tree-row folder-row ${active ? 'active' : ''} ${dragOverId === f.id ? 'drag-over' : ''}`}
           style={{ paddingLeft: 6 + depth * 15 }}
+          draggable={!isRenaming}
           onClick={() => toggleFolder(f.id)}
+          onDragStart={(e) => {
+            e.stopPropagation();
+            setDragItem({ kind: 'folder', id: f.id });
+            e.dataTransfer.setData('text/plain', f.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragEnd={() => {
+            setDragItem(null);
+            setDragOverId(null);
+          }}
           onDragOver={(e) => {
-            if (!dragReqId) return;
+            if (!canDropIntoFolder(f.id)) return;
             e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
             setDragOverId(f.id);
           }}
-          onDragLeave={() => setDragOverId(null)}
+          onDragLeave={() => {
+            if (dragOverId === f.id) setDragOverId(null);
+          }}
           onDrop={(e) => {
             e.preventDefault();
-            if (dragReqId) moveRequest(dragReqId, f.id);
-            setDragReqId(null);
+            e.stopPropagation();
+            if (dragItem && canDropIntoFolder(f.id)) {
+              if (dragItem.kind === 'request') moveRequest(dragItem.id, f.id);
+              else moveFolder(dragItem.id, f.id);
+            }
+            setDragItem(null);
             setDragOverId(null);
           }}
           onContextMenu={(e) => {
@@ -331,13 +389,14 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
       <div
         className="tree-scroll"
         onDragOver={(e) => {
-          if (dragReqId) e.preventDefault();
+          if (dragItem) e.preventDefault();
         }}
         onDrop={(e) => {
-          if (dragReqId && !dragOverId) {
+          if (dragItem && !dragOverId) {
             e.preventDefault();
-            moveRequest(dragReqId, null);
-            setDragReqId(null);
+            if (dragItem.kind === 'request') moveRequest(dragItem.id, null);
+            else moveFolder(dragItem.id, null);
+            setDragItem(null);
           }
         }}
       >
@@ -394,8 +453,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               <button
                 className="menu-item"
                 onClick={() => {
-                  copyText(exportAsCurl(data, ctxReq, { secretMode: 'mask', includeJq: true }));
-                  toast(t('已复制为 cURL（密钥已脱敏）', 'Copied as cURL (secrets masked)'), 'success');
+                  copyRequestAsCurl(ctxReq);
                   setCtx(null);
                 }}
               >
@@ -521,6 +579,17 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                   {t('重命名', 'Rename')}
                 </span>
               </button>
+              {ctxFolder.parentId && (
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    moveFolder(ctxFolder.id, null);
+                    setCtx(null);
+                  }}
+                >
+                  <span>{t('移至根目录', 'Move to Root')}</span>
+                </button>
+              )}
               <div className="menu-sep" />
               <button
                 className="menu-item danger"

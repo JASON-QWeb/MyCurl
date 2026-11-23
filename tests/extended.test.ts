@@ -5,8 +5,9 @@ import { exportMyCurlJson, importPostmanCollection, isPostmanCollection } from '
 import { prepareRequest } from '../src/lib/requestRunner';
 import { parseCurl } from '../src/lib/curlParser';
 import { applyImport, planImport } from '../src/lib/curlImport';
-import { seedData } from '../src/lib/factory';
+import { defaultSettings, newFolder, normalizeData, seedData } from '../src/lib/factory';
 import { syncParamsFromUrl, syncUrlFromParams } from '../src/lib/urlParams';
+import { useAppStore } from '../src/store/useAppStore';
 
 const USER_CURL = `curl -sS 'https://api.example-llm.dev/v1/chat/completions' \\
   -H "Authorization: Bearer sk-demo0000111122223333444455556666777788889999" \\
@@ -165,5 +166,39 @@ describe('集合导入导出与 URL 参数同步', () => {
     ]);
     params[1].enabled = false;
     expect(syncUrlFromParams('https://a.com/x?a=1&b=2#top', params)).toBe('https://a.com/x?a=1#top');
+  });
+
+  it('curlCopySecretMode 默认脱敏且支持明文与占位符配置持久化', () => {
+    expect(defaultSettings().curlCopySecretMode).toBe('mask');
+    const raw = seedData();
+    // 兼容旧数据缺少该字段的情况
+    const legacy = JSON.parse(JSON.stringify(raw));
+    delete legacy.settings.curlCopySecretMode;
+    expect(normalizeData(legacy).settings.curlCopySecretMode).toBe('mask');
+
+    raw.settings.curlCopySecretMode = 'resolve';
+    expect(normalizeData(raw).settings.curlCopySecretMode).toBe('resolve');
+  });
+
+  it('支持文件夹拖拽嵌套进路由目录，并阻止循环嵌套', () => {
+    const init = seedData();
+    const wsId = init.workspaces[0].id;
+    const routeFolder = init.folders[0];
+    const subA = newFolder(wsId, null, { name: '子目录 A' });
+    const subB = newFolder(wsId, subA.id, { name: '子目录 B' });
+    useAppStore.setState({ data: { ...init, folders: [...init.folders, subA, subB] } });
+
+    // 将 subA 移入路由目录
+    expect(useAppStore.getState().moveFolder(subA.id, routeFolder.id)).toBe(true);
+    expect(useAppStore.getState().data.folders.find((f) => f.id === subA.id)?.parentId).toBe(routeFolder.id);
+
+    // 阻止把父目录移入自身或子孙目录
+    expect(useAppStore.getState().moveFolder(routeFolder.id, routeFolder.id)).toBe(false);
+    expect(useAppStore.getState().moveFolder(routeFolder.id, subA.id)).toBe(false);
+    expect(useAppStore.getState().moveFolder(routeFolder.id, subB.id)).toBe(false);
+
+    // 支持移回根目录
+    expect(useAppStore.getState().moveFolder(subA.id, null)).toBe(true);
+    expect(useAppStore.getState().data.folders.find((f) => f.id === subA.id)?.parentId).toBe(null);
   });
 });

@@ -128,6 +128,8 @@ export interface Workspace {
 
 export type Language = 'zh' | 'en';
 
+export type CurlCopySecretMode = 'mask' | 'resolve' | 'template';
+
 export interface Settings {
   theme: 'dark' | 'light' | 'system';
   language: Language;
@@ -147,6 +149,8 @@ export interface Settings {
     /** 导入后自动发送 */
     autoSend: boolean;
   };
+  /** 一键复制 cURL / 打开导出弹窗时的默认密钥处理方式 */
+  curlCopySecretMode: CurlCopySecretMode;
   editorFontSize: number;
   sidebarWidth: number;
   responsePaneRatio: number;

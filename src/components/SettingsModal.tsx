@@ -9,6 +9,7 @@ import {
 } from '../lib/collectionIO';
 import { parseCurlCommands } from '../lib/curlParser';
 import { useI18n, type Language } from '../lib/i18n';
+import type { CurlCopySecretMode } from '../lib/types';
 import { IconDownload, IconSettings, IconUpload, IconX } from './Icons';
 
 export const SettingsModal: React.FC = () => {
@@ -255,6 +256,21 @@ export const SettingsModal: React.FC = () => {
                 onChange={(e) => updateImportSettings({ groupByHost: e.target.checked })}
                 style={{ accentColor: 'var(--accent)' }}
               />
+            </div>
+            <div className="switch-row">
+              <div>
+                <div>{t('复制 cURL 时的密钥处理', 'Secrets When Copying cURL')}</div>
+                <small>{t('控制一键复制 cURL 与导出代码弹窗的默认密钥模式', 'Default secret handling for quick-copy cURL and code export')}</small>
+              </div>
+              <select
+                className="select select-sm"
+                value={s.curlCopySecretMode ?? 'mask'}
+                onChange={(e) => updateSettings({ curlCopySecretMode: e.target.value as CurlCopySecretMode })}
+              >
+                <option value="mask">{t('密钥脱敏（推荐）', 'Mask secrets (recommended)')}</option>
+                <option value="resolve">{t('填充真实明文密钥', 'Include raw secret values')}</option>
+                <option value="template">{t('保留 {{变量}} 占位符', 'Keep {{variable}} placeholders')}</option>
+              </select>
             </div>
           </div>
 

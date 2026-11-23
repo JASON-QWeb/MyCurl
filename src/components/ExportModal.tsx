@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { exportAsCurl, exportAsFetch, exportAsPython, generateRequestDoc, type CodeGenOptions } from '../lib/curlExport';
 import { copyText } from '../lib/util';
@@ -8,9 +8,16 @@ import { IconCode, IconCopy, IconX } from './Icons';
 export const ExportModal: React.FC = () => {
   const { data, exportModal, setExportModal, toast } = useAppStore();
   const { t } = useI18n();
+  const defaultSecretMode = data.settings.curlCopySecretMode ?? 'mask';
   const [lang, setLang] = useState<'curl' | 'fetch' | 'python' | 'markdown'>('curl');
-  const [secretMode, setSecretMode] = useState<CodeGenOptions['secretMode']>('mask');
+  const [secretMode, setSecretMode] = useState<CodeGenOptions['secretMode']>(defaultSecretMode);
   const [includeJq, setIncludeJq] = useState(true);
+
+  useEffect(() => {
+    if (exportModal) {
+      setSecretMode(defaultSecretMode);
+    }
+  }, [exportModal?.requestId, defaultSecretMode]);
 
   const req = exportModal ? data.requests.find((r) => r.id === exportModal.requestId) : null;
 

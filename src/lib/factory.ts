@@ -74,6 +74,7 @@ export function defaultSettings(): Settings {
       skipPreview: false,
       autoSend: false,
     },
+    curlCopySecretMode: 'mask',
     editorFontSize: 13,
     sidebarWidth: 270,
     responsePaneRatio: 0.5,

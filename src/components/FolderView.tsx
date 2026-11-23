@@ -12,6 +12,7 @@ import {
   IconDoc,
   IconEye,
   IconEyeOff,
+  IconFolder,
   IconGlobe,
   IconKey,
   IconPlus,
@@ -19,7 +20,7 @@ import {
 } from './Icons';
 
 export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
-  const { data, selection, updateFolder, deleteFolder, createRequest, selectRequest, setDocModal, setEnvModal, confirm, toast } = useAppStore();
+  const { data, selection, createFolder, updateFolder, deleteFolder, createRequest, selectFolder, selectRequest, setDocModal, setEnvModal, confirm, toast } = useAppStore();
   const { lang, t } = useI18n();
   const initialTab = selection?.kind === 'folder' && selection.id === folder.id && selection.tab ? selection.tab : 'overview';
   const [tab, setTab] = useState<'overview' | 'vars' | 'auth' | 'headers'>(initialTab);
@@ -41,6 +42,10 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
   );
 
   const vars = useMemo(() => resolveVariables(data, folder.workspaceId, folder.id), [data, folder.workspaceId, folder.id]);
+  const childFolders = useMemo(
+    () => data.folders.filter((f) => f.parentId === folder.id).sort((a, b) => a.sortOrder - b.sortOrder),
+    [data.folders, folder.id],
+  );
   const childRequests = useMemo(
     () => data.requests.filter((r) => r.folderId === folder.id).sort((a, b) => a.sortOrder - b.sortOrder),
     [data.requests, folder.id],
@@ -129,6 +134,10 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
           <button className="btn" onClick={() => setDocModal({ scope: 'folder', folderId: folder.id })}>
             <IconDoc size={14} />
             {t('导出 Markdown 文档', 'Export Markdown')}
+          </button>
+          <button className="btn" onClick={() => createFolder(folder.id, t('子文件夹', 'Subfolder'))}>
+            <IconFolder size={14} />
+            {t('新建子文件夹', 'New Subfolder')}
           </button>
           <button className="btn btn-primary" onClick={() => createRequest(folder.id)}>
             <IconPlus size={14} />
@@ -244,6 +253,35 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
                 )}
               </div>
             </div>
+
+            {/* 子文件夹 */}
+            {childFolders.length > 0 && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-title">
+                  <span>{t(`子文件夹（${childFolders.length}）`, `Subfolders (${childFolders.length})`)}</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => createFolder(folder.id, t('子文件夹', 'Subfolder'))}>
+                    <IconPlus size={12} />
+                    {t('新建', 'New')}
+                  </button>
+                </div>
+                <div className="route-list">
+                  {childFolders.map((cf) => {
+                    const reqCount = data.requests.filter((r) => r.folderId === cf.id).length;
+                    return (
+                      <div key={cf.id} className="route-item" onClick={() => selectFolder(cf.id)}>
+                        <span style={{ display: 'inline-flex', color: cf.host ? 'var(--accent)' : 'var(--text-dim)' }}>
+                          {cf.host ? <IconGlobe size={14} /> : <IconFolder size={14} />}
+                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 500 }}>{cf.name}</div>
+                        </div>
+                        <span className="pill">{t(`${reqCount} 条请求`, `${reqCount} reqs`)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* 接口一览 */}
             <div className="card" style={{ marginBottom: 16 }}>

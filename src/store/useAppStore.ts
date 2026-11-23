@@ -91,6 +91,7 @@ interface AppStore {
   // 文件夹
   createFolder: (parentId: string | null, name?: string) => Folder;
   updateFolder: (id: string, patch: Partial<Folder>) => void;
+  moveFolder: (id: string, parentId: string | null) => boolean;
   deleteFolder: (id: string) => void;
 
   // 请求
@@ -396,6 +397,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ...d,
       folders: d.folders.map((f) => (f.id === id ? { ...f, ...patch } : f)),
     }));
+  },
+
+  moveFolder: (id, parentId) => {
+    const d = get().data;
+    const folder = d.folders.find((f) => f.id === id);
+    if (!folder) return false;
+    if (folder.parentId === parentId) return false;
+    if (parentId === id) return false;
+    // 防止把文件夹拖进自己的子孙目录造成循环嵌套
+    if (parentId) {
+      let cur: string | null = parentId;
+      const seen = new Set<string>();
+      while (cur && !seen.has(cur)) {
+        if (cur === id) return false;
+        seen.add(cur);
+        cur = d.folders.find((f) => f.id === cur)?.parentId ?? null;
+      }
+    }
+    get().mutate((cur) => ({
+      ...cur,
+      folders: cur.folders.map((f) => (f.id === id ? { ...f, parentId } : f)),
+    }));
+    if (parentId) {
+      set((s) => ({ expandedFolders: { ...s.expandedFolders, [parentId]: true } }));
+    }
+    return true;
   },
 
   deleteFolder: (id) => {

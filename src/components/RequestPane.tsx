@@ -212,21 +212,32 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const enabledHeadersCount = req.headers.filter((h) => h.enabled && h.key.trim()).length + inheritedHeaders.length;
   const hasAuth = effectiveAuth.auth.type !== 'none';
 
+  const curlSecretMode = data.settings.curlCopySecretMode ?? 'mask';
+  const copyCurlTitle =
+    curlSecretMode === 'resolve'
+      ? t('复制为 cURL 命令（含明文密钥）', 'Copy as cURL (raw secrets)')
+      : curlSecretMode === 'template'
+        ? t('复制为 cURL 命令（保留 {{变量}}）', 'Copy as cURL (keep {{variables}})')
+        : t('复制为 cURL 命令（密钥脱敏）', 'Copy as cURL (secrets masked)');
+
   return (
     <section className="pane">
       {/* 顶部标题与面包屑 */}
       <div className="req-header">
         <div className="req-title-group">
-          {parentFolder && (
-            <button
-              className="crumb-btn"
-              onClick={() => selectFolder(parentFolder.id)}
-              title={t(`点击打开目录「${parentFolder.name}」的归档文档与密钥`, `Open "${parentFolder.name}" docs & secrets`)}
-            >
-              <IconFolder size={12} />
-              <span>{parentFolder.name}</span>
-            </button>
-          )}
+          {chain.map((f, idx) => (
+            <React.Fragment key={f.id}>
+              {idx > 0 && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>/</span>}
+              <button
+                className="crumb-btn"
+                onClick={() => selectFolder(f.id)}
+                title={t(`点击打开目录「${f.name}」的归档文档与密钥`, `Open "${f.name}" docs & secrets`)}
+              >
+                <IconFolder size={12} />
+                <span>{f.name}</span>
+              </button>
+            </React.Fragment>
+          ))}
           <input
             className="req-name-input"
             value={req.name}
@@ -237,10 +248,17 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button
             className="btn btn-ghost btn-sm"
-            title={t('复制为 cURL 命令（密钥脱敏）', 'Copy as cURL (secrets masked)')}
+            title={copyCurlTitle}
             onClick={() => {
-              copyText(exportAsCurl(data, req, { secretMode: 'mask', includeJq: true }));
-              toast(t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'), 'success');
+              copyText(exportAsCurl(data, req, { secretMode: curlSecretMode, includeJq: true }));
+              toast(
+                curlSecretMode === 'resolve'
+                  ? t('已复制 cURL 命令（含明文密钥）', 'Copied cURL (raw secrets included)')
+                  : curlSecretMode === 'template'
+                    ? t('已复制 cURL 命令（保留 {{变量}}）', 'Copied cURL (with {{variables}})')
+                    : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
+                'success',
+              );
             }}
           >
             <IconCopy size={13} />
