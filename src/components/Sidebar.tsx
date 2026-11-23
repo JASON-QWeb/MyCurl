@@ -51,6 +51,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     openImportModal,
     setExportModal,
     setDocModal,
+    confirm,
     toast,
   } = useAppStore();
 
@@ -90,6 +91,16 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     if (f.name.toLowerCase().includes(q) || (f.host && f.host.toLowerCase().includes(q))) return true;
     if (requests.some((r) => r.folderId === fid && matchesReq(r))) return true;
     return folders.some((c) => c.parentId === fid && folderHasMatch(c.id));
+  };
+
+  const handleDeleteFolder = async (f: Folder) => {
+    const ok = await confirm({
+      title: '删除文件夹',
+      message: `确定删除文件夹「${f.name}」及其中的所有子目录和请求吗？此操作无法撤销。`,
+      confirmLabel: '删除',
+      danger: true,
+    });
+    if (ok) deleteFolder(f.id);
   };
 
   const commitRename = () => {
@@ -249,6 +260,13 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                 onClick={() => createRequest(f.id)}
               >
                 <IconPlus size={12} />
+              </button>
+              <button
+                className="btn btn-ghost btn-icon btn-sm"
+                title="删除文件夹"
+                onClick={() => handleDeleteFolder(f)}
+              >
+                <IconTrash size={12} />
               </button>
             </div>
           </div>
@@ -491,10 +509,9 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               <button
                 className="menu-item danger"
                 onClick={() => {
-                  if (window.confirm(`确定删除文件夹「${ctxFolder.name}」及其中的所有请求吗？`)) {
-                    deleteFolder(ctxFolder.id);
-                  }
+                  const target = ctxFolder;
                   setCtx(null);
+                  void handleDeleteFolder(target);
                 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>

@@ -20,6 +20,7 @@ export const SettingsModal: React.FC = () => {
     updateImportSettings,
     replaceData,
     applyBatchImport,
+    confirm,
     toast,
   } = useAppStore();
 
@@ -54,7 +55,13 @@ export const SettingsModal: React.FC = () => {
         return;
       }
       if (isMyCurlBackup(json)) {
-        if (!window.confirm('导入 MyCurl 备份将替换当前全部工作区数据，是否继续？')) return;
+        const ok = await confirm({
+          title: '恢复 MyCurl 备份',
+          message: '导入 MyCurl 备份将替换当前全部工作区数据，是否继续？',
+          confirmLabel: '继续恢复',
+          danger: true,
+        });
+        if (!ok) return;
         replaceData(importMyCurlBackup(json));
         toast('已恢复 MyCurl 备份数据', 'success');
         setSettingsModal(false);

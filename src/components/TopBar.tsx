@@ -35,19 +35,29 @@ export const TopBar: React.FC = () => {
     setCommandPalette,
     setDocModal,
     updateSettings,
+    confirm,
+    prompt,
   } = useAppStore();
 
   const [openMenu, setOpenMenu] = useState<'ws' | 'env' | null>(null);
   const [newWsName, setNewWsName] = useState('');
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const menusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!openMenu) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpenMenu(null);
+      if (menusRef.current && !menusRef.current.contains(e.target as Node)) setOpenMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenu(null);
     };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, []);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenu]);
 
   const wsId = data.settings.activeWorkspaceId || data.workspaces[0].id;
   const activeWs = data.workspaces.find((w) => w.id === wsId) ?? data.workspaces[0];
@@ -68,7 +78,7 @@ export const TopBar: React.FC = () => {
   };
 
   return (
-    <header className="topbar" ref={wrapRef} data-tauri-drag-region>
+    <header className="topbar" data-tauri-drag-region>
       <div className="topbar-left">
         <div className="brand" title="MyCurl — 中文本地优先 API 调试与 cURL 归档工具">
           <img
@@ -83,148 +93,167 @@ export const TopBar: React.FC = () => {
 
         <div className="divider-v" />
 
-        {/* 工作区切换 */}
-        <div className="dropdown-wrap">
-          <button
-            className="btn btn-ghost"
-            onClick={() => setOpenMenu(openMenu === 'ws' ? null : 'ws')}
-            title="切换或新建工作区"
-          >
-            <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeWs.name}</span>
-            <IconChevronDown size={13} />
-          </button>
-          {openMenu === 'ws' && (
-            <div className="menu-pop" style={{ minWidth: 230 }}>
-              <div className="menu-title">工作区</div>
-              {data.workspaces.map((w) => (
-                <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <button
-                    className={`menu-item ${w.id === wsId ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveWorkspace(w.id);
-                      setOpenMenu(null);
-                    }}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</span>
-                    {w.id === wsId && <IconCheck size={13} />}
-                  </button>
-                  {data.workspaces.length > 1 && (
+        <div ref={menusRef} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* 工作区切换 */}
+          <div className="dropdown-wrap">
+            <button
+              className="btn btn-ghost"
+              onClick={() => setOpenMenu(openMenu === 'ws' ? null : 'ws')}
+              title="切换或新建工作区"
+            >
+              <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeWs.name}</span>
+              <IconChevronDown size={13} />
+            </button>
+            {openMenu === 'ws' && (
+              <div className="menu-pop" style={{ minWidth: 230 }}>
+                <div className="menu-title">工作区</div>
+                {data.workspaces.map((w) => (
+                  <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <button
-                      className="btn btn-ghost btn-icon btn-sm"
-                      title="删除工作区"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`确定删除工作区「${w.name}」及其所有请求吗？`)) {
-                          deleteWorkspace(w.id);
-                          setOpenMenu(null);
-                        }
+                      className={`menu-item ${w.id === wsId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveWorkspace(w.id);
+                        setOpenMenu(null);
                       }}
                     >
-                      <IconTrash size={12} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</span>
+                      {w.id === wsId && <IconCheck size={13} />}
                     </button>
-                  )}
-                </div>
-              ))}
-              <div className="menu-sep" />
-              <div style={{ padding: '4px 6px', display: 'flex', gap: 4 }}>
-                <input
-                  className="input input-sm"
-                  style={{ flex: 1, minWidth: 0 }}
-                  placeholder="新建工作区名称…"
-                  value={newWsName}
-                  onChange={(e) => setNewWsName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newWsName.trim()) {
+                    {data.workspaces.length > 1 && (
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        title="删除工作区"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setOpenMenu(null);
+                          const ok = await confirm({
+                            title: '删除工作区',
+                            message: `确定删除工作区「${w.name}」及其中的所有目录、请求和环境变量吗？此操作无法撤销。`,
+                            confirmLabel: '删除',
+                            danger: true,
+                          });
+                          if (ok) deleteWorkspace(w.id);
+                        }}
+                      >
+                        <IconTrash size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div className="menu-sep" />
+                <div style={{ padding: '4px 6px', display: 'flex', gap: 4 }}>
+                  <input
+                    className="input input-sm"
+                    style={{ flex: 1, minWidth: 0 }}
+                    placeholder="新建工作区名称…"
+                    value={newWsName}
+                    onChange={(e) => setNewWsName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newWsName.trim()) {
+                        createWorkspace(newWsName);
+                        setNewWsName('');
+                        setOpenMenu(null);
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      if (!newWsName.trim()) return;
                       createWorkspace(newWsName);
                       setNewWsName('');
                       setOpenMenu(null);
-                    }
-                  }}
-                />
+                    }}
+                  >
+                    <IconPlus size={12} />
+                  </button>
+                </div>
                 <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => {
-                    if (!newWsName.trim()) return;
-                    createWorkspace(newWsName);
-                    setNewWsName('');
+                  className="menu-item"
+                  onClick={async () => {
                     setOpenMenu(null);
+                    const next = await prompt({
+                      title: '重命名工作区',
+                      defaultValue: activeWs.name,
+                      placeholder: '输入新的工作区名称…',
+                      confirmLabel: '保存',
+                    });
+                    if (next?.trim()) renameWorkspace(activeWs.id, next.trim());
                   }}
                 >
-                  <IconPlus size={12} />
+                  <span>重命名当前工作区…</span>
                 </button>
               </div>
-              <button
-                className="menu-item"
-                onClick={() => {
-                  const next = window.prompt('重命名当前工作区', activeWs.name);
-                  if (next?.trim()) renameWorkspace(activeWs.id, next.trim());
-                  setOpenMenu(null);
-                }}
-              >
-                <span>重命名当前工作区…</span>
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* 环境切换 */}
-        <div className="dropdown-wrap">
-          <button
-            className="btn btn-ghost"
-            onClick={() => setOpenMenu(openMenu === 'env' ? null : 'env')}
-            title="切换环境变量"
-          >
-            <span className="env-dot" style={{ background: activeEnv?.color ?? 'var(--text-muted)' }} />
-            <span>{activeEnv ? activeEnv.name : '仅全局变量'}</span>
-            <IconChevronDown size={13} />
-          </button>
-          {openMenu === 'env' && (
-            <div className="menu-pop" style={{ minWidth: 210 }}>
-              <div className="menu-title">运行环境</div>
-              <button
-                className={`menu-item ${activeEnvId === null ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveEnvironment(null);
-                  setOpenMenu(null);
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span className="env-dot" style={{ background: 'var(--text-muted)' }} />
-                  仅全局变量
-                </span>
-                {activeEnvId === null && <IconCheck size={13} />}
-              </button>
-              {subEnvs.map((e) => (
+          {/* 环境切换 */}
+          <div className="dropdown-wrap">
+            <button
+              className="btn btn-ghost"
+              onClick={() => setOpenMenu(openMenu === 'env' ? null : 'env')}
+              title="切换运行环境（控制开发/测试/生产等子环境变量覆盖）"
+            >
+              <span className="env-dot" style={{ background: activeEnv?.color ?? 'var(--text-muted)' }} />
+              <span>{activeEnv ? activeEnv.name : '仅全局变量'}</span>
+              <IconChevronDown size={13} />
+            </button>
+            {openMenu === 'env' && (
+              <div className="menu-pop" style={{ minWidth: 235 }}>
+                <div className="menu-title">运行环境</div>
                 <button
-                  key={e.id}
-                  className={`menu-item ${activeEnvId === e.id ? 'active' : ''}`}
+                  className={`menu-item ${activeEnvId === null ? 'active' : ''}`}
                   onClick={() => {
-                    setActiveEnvironment(e.id);
+                    setActiveEnvironment(null);
                     setOpenMenu(null);
                   }}
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <span className="env-dot" style={{ background: e.color || 'var(--accent)' }} />
-                    {e.name}
+                    <span className="env-dot" style={{ background: 'var(--text-muted)' }} />
+                    仅全局变量
                   </span>
-                  {activeEnvId === e.id && <IconCheck size={13} />}
+                  {activeEnvId === null && <IconCheck size={13} />}
                 </button>
-              ))}
-              <div className="menu-sep" />
-              <button
-                className="menu-item"
-                onClick={() => {
-                  setOpenMenu(null);
-                  setEnvModal(true);
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <IconLayers size={13} />
-                  管理环境与密钥库…
-                </span>
-              </button>
-            </div>
-          )}
+                {subEnvs.map((e) => (
+                  <button
+                    key={e.id}
+                    className={`menu-item ${activeEnvId === e.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveEnvironment(e.id);
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span className="env-dot" style={{ background: e.color || 'var(--accent)' }} />
+                      {e.name}
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {e.variables.length > 0 && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.variables.length}</span>
+                      )}
+                      {activeEnvId === e.id && <IconCheck size={13} />}
+                    </span>
+                  </button>
+                ))}
+                <div className="menu-sep" />
+                <div style={{ padding: '4px 8px 6px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  变量优先级：全局变量 &lt; 当前环境 &lt; 文件夹变量
+                </div>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setEnvModal(true);
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <IconLayers size={13} />
+                    管理环境与密钥库…
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

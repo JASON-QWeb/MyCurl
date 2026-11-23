@@ -13,6 +13,17 @@ export interface ToastItem {
   message: string;
 }
 
+export interface DialogState {
+  kind: 'confirm' | 'prompt';
+  title: string;
+  message?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}
+
 export interface InFlightState {
   controller: AbortController;
   startedAt: number;
@@ -27,7 +38,7 @@ interface AppStore {
   serverInfo: ServerInfo | null;
 
   /** 当前选中的对象：请求或文件夹（查看文件夹文档与变量） */
-  selection: { kind: 'request' | 'folder'; id: string } | null;
+  selection: { kind: 'request'; id: string } | { kind: 'folder'; id: string; tab?: 'overview' | 'vars' | 'auth' | 'headers' } | null;
   expandedFolders: Record<string, boolean>;
   sidebarFilter: string;
 
@@ -49,6 +60,7 @@ interface AppStore {
   commandPalette: boolean;
   exportModal: { requestId: string } | null;
   docModal: { scope: 'workspace' | 'folder'; folderId?: string } | null;
+  dialog: DialogState | null;
 
   toasts: ToastItem[];
 
@@ -59,7 +71,7 @@ interface AppStore {
 
   // 选择与导航
   selectRequest: (id: string) => void;
-  selectFolder: (id: string) => void;
+  selectFolder: (id: string, tab?: 'overview' | 'vars' | 'auth' | 'headers') => void;
   toggleFolder: (id: string, force?: boolean) => void;
   setSidebarFilter: (q: string) => void;
 
@@ -111,12 +123,16 @@ interface AppStore {
   setCommandPalette: (open: boolean) => void;
   setExportModal: (requestId: string | null) => void;
   setDocModal: (modal: { scope: 'workspace' | 'folder'; folderId?: string } | null) => void;
+  confirm: (opts: { title: string; message?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }) => Promise<boolean>;
+  prompt: (opts: { title: string; message?: string; defaultValue?: string; placeholder?: string; confirmLabel?: string; cancelLabel?: string }) => Promise<string | null>;
+  closeDialog: (result: boolean | string | null) => void;
   toast: (message: string, kind?: ToastItem['kind']) => void;
   removeToast: (id: string) => void;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingSaveData: AppData | null = null;
+let dialogResolver: ((result: boolean | string | null) => void) | null = null;
 
 function flushSave(set: (partial: Partial<AppStore>) => void) {
   if (!pendingSaveData) return;
@@ -170,6 +186,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   commandPalette: false,
   exportModal: null,
   docModal: null,
+  dialog: null,
   toasts: [],
 
   init: async () => {
@@ -243,9 +260,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  selectFolder: (id) => {
+  selectFolder: (id, tab) => {
     set((s) => ({
-      selection: { kind: 'folder', id },
+      selection: { kind: 'folder', id, tab },
       expandedFolders: { ...s.expandedFolders, [id]: true },
     }));
   },
@@ -378,6 +395,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   deleteFolder: (id) => {
     const d = get().data;
+    const folder = d.folders.find((f) => f.id === id);
     const toRemove = new Set<string>([id]);
     let added = true;
     while (added) {
@@ -389,6 +407,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         }
       }
     }
+    const removedReqIds = d.requests
+      .filter((r) => r.folderId && toRemove.has(r.folderId))
+      .map((r) => r.id);
     const sel = get().selection;
     const selRemoved =
       (sel?.kind === 'folder' && toRemove.has(sel.id)) ||
@@ -401,10 +422,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }),
       true,
     );
+    for (const reqId of removedReqIds) deleteHistoryItem(reqId);
     if (selRemoved) {
       const next = firstRequestInWs(get().data, activeWsId(get().data));
       set({ selection: next ? { kind: 'request', id: next.id } : null });
     }
+    if (folder) get().toast(`已删除文件夹「${folder.name}」`, 'success');
   },
 
   createRequest: (folderId, partial = {}) => {
@@ -605,6 +628,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setCommandPalette: (open) => set({ commandPalette: open }),
   setExportModal: (requestId) => set({ exportModal: requestId ? { requestId } : null }),
   setDocModal: (modal) => set({ docModal: modal }),
+
+  confirm: (opts) =>
+    new Promise<boolean>((resolve) => {
+      if (dialogResolver) {
+        const prev = dialogResolver;
+        dialogResolver = null;
+        prev(false);
+      }
+      dialogResolver = (val) => resolve(val === true);
+      set({ dialog: { kind: 'confirm', ...opts } });
+    }),
+
+  prompt: (opts) =>
+    new Promise<string | null>((resolve) => {
+      if (dialogResolver) {
+        const prev = dialogResolver;
+        dialogResolver = null;
+        prev(null);
+      }
+      dialogResolver = (val) => resolve(typeof val === 'string' ? val : null);
+      set({ dialog: { kind: 'prompt', ...opts } });
+    }),
+
+  closeDialog: (result) => {
+    const fn = dialogResolver;
+    dialogResolver = null;
+    set({ dialog: null });
+    fn?.(result);
+  },
 
   toast: (message, kind = 'info') => {
     const id = uid('toast_');

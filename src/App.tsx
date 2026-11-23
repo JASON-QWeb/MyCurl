@@ -14,6 +14,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ExportModal } from './components/ExportModal';
 import { DocModal } from './components/DocModal';
 import { CommandPalette } from './components/CommandPalette';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { IconPlus, IconSparkles } from './components/Icons';
 
 export const App: React.FC = () => {
@@ -226,6 +227,7 @@ export const App: React.FC = () => {
       <ExportModal />
       <DocModal />
       <CommandPalette />
+      <ConfirmDialog />
 
       {/* Toast 提示 */}
       <div className="toast-stack">

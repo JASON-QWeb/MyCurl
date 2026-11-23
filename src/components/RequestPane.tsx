@@ -78,6 +78,21 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const effectiveAuth = useMemo(() => resolveEffectiveAuth(data, req), [data, req]);
   const inheritedHeaders = useMemo(() => resolveInheritedHeaders(data, req.folderId), [data, req.folderId]);
 
+  const authVarPickerActions = useMemo(() => {
+    const actions: { label: string; onClick: () => void }[] = [];
+    if (parentFolder) {
+      actions.push({
+        label: `管理「${parentFolder.name}」的密钥与变量…`,
+        onClick: () => selectFolder(parentFolder.id, 'vars'),
+      });
+    }
+    actions.push({
+      label: '打开环境变量与密钥库…',
+      onClick: () => setEnvModal(true),
+    });
+    return actions;
+  }, [parentFolder, selectFolder, setEnvModal]);
+
   // 收集当前请求引用的所有模板变量，方便一眼查看解析结果与来源
   const usedVarNames = useMemo(() => {
     const names = new Set<string>();
@@ -281,7 +296,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                 <button
                   key={name}
                   className="var-chip missing"
-                  onClick={() => (parentFolder ? selectFolder(parentFolder.id) : setEnvModal(true))}
+                  onClick={() => (parentFolder ? selectFolder(parentFolder.id, 'vars') : setEnvModal(true))}
                   title="变量未定义，点击去添加"
                 >
                   {`{{${name}}}`} · 未定义
@@ -293,7 +308,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
               <button
                 key={name}
                 className={`var-chip ${v.secret ? 'secret' : 'ok'}`}
-                onClick={() => (v.sourceKind === 'folder' && v.sourceId ? selectFolder(v.sourceId) : setEnvModal(true))}
+                onClick={() => (v.sourceKind === 'folder' && v.sourceId ? selectFolder(v.sourceId, 'vars') : setEnvModal(true))}
                 title={`来源：${v.source}，点击查看或修改`}
               >
                 {v.secret && <IconKey size={10} />}
@@ -563,7 +578,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
         )}
 
         {tab === 'auth' && (
-          <div className="tab-scroll" style={{ maxWidth: 560 }}>
+          <div className="tab-scroll" style={{ maxWidth: 560, paddingBottom: 140 }}>
             <div className="form-row">
               <label>认证方式</label>
               <select
@@ -595,7 +610,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
             {req.auth.type === 'bearer' && (
               <>
                 <div className="form-row">
-                  <label>令牌 Token（支持 {'{{api_key}}'}）</label>
+                  <label>令牌 Token（可直接输入，或下拉选择已有密钥 / 变量）</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <TemplateInput
                       value={req.auth.token ?? ''}
@@ -603,6 +618,9 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                       vars={vars}
                       placeholder="sk-… 或 {{api_key}}"
                       bordered
+                      showVarPicker
+                      varPickerLabel="选择密钥"
+                      varPickerActions={authVarPickerActions}
                     />
                     {req.auth.token && !req.auth.token.includes('{{') && (
                       <button
@@ -635,7 +653,15 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                 </div>
                 <div className="form-row">
                   <label>密码</label>
-                  <TemplateInput value={req.auth.password ?? ''} onChange={(v) => updateAuth({ password: v })} vars={vars} bordered />
+                  <TemplateInput
+                    value={req.auth.password ?? ''}
+                    onChange={(v) => updateAuth({ password: v })}
+                    vars={vars}
+                    bordered
+                    showVarPicker
+                    varPickerLabel="选择密钥"
+                    varPickerActions={authVarPickerActions}
+                  />
                 </div>
               </>
             )}
@@ -653,7 +679,15 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                 </div>
                 <div className="form-row">
                   <label>值</label>
-                  <TemplateInput value={req.auth.value ?? ''} onChange={(v) => updateAuth({ value: v })} vars={vars} bordered />
+                  <TemplateInput
+                    value={req.auth.value ?? ''}
+                    onChange={(v) => updateAuth({ value: v })}
+                    vars={vars}
+                    bordered
+                    showVarPicker
+                    varPickerLabel="选择密钥"
+                    varPickerActions={authVarPickerActions}
+                  />
                 </div>
                 <div className="form-row">
                   <label>传递位置</label>

@@ -1,167 +1,127 @@
 <div align="center">
 
-<img src="src-tauri/icons/icon.png" width="112" height="112" alt="MyCurl Logo" />
+<img src="src-tauri/icons/icon.png" width="108" height="108" alt="MyCurl Logo" />
 
 # MyCurl
 
-**面向中文开发者的本地优先 API 调试客户端 & AI cURL 智能归档工具**
+**把 AI 给的 `curl` 命令直接存成中文接口库**
 
-参考 [Yaak](https://github.com/mountain-loop/yaak) 设计理念 · **Rust + Tauri v2 原生核心** · 离线优先 · 零云端上传
+免拆 URL · 自动收好 API Key · 数据只存本地
 
-![Rust](https://img.shields.io/badge/Core-Rust%20%2B%20Tauri%20v2-orange?style=flat-square)
-![Frontend](https://img.shields.io/badge/UI-React%2018%20%2B%20TypeScript-3178c6?style=flat-square)
+[![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-111827?style=flat-square)
-![Local-First](https://img.shields.io/badge/Storage-Local--First-10b981?style=flat-square)
+![Size](https://img.shields.io/badge/安装包-~3%20MB-3b82f6?style=flat-square)
+![Local-First](https://img.shields.io/badge/存储-纯本地%20·%20免登录-f59e0b?style=flat-square)
 
+</div>
+
+<br />
+
+<div align="center">
+  <img src="assets/mock-main.png" width="96%" alt="MyCurl 主界面" />
 </div>
 
 ---
 
-## 为什么做 MyCurl？
+## 解决什么问题
 
-日常调用大模型或对接第三方接口时，AI 或官方文档经常会直接给出一大段包含明文密钥、路径、JSON 请求体甚至 `| jq` 管道的 `curl` 命令。传统 API 工具需要手动拆 URL、填 Header、配 Token、建目录、写笔记——重复且容易在聊天记录里弄丢密钥。
+调大模型或接第三方接口时，文档和 AI 给的往往是一整段 `curl` 命令，里面混着明文密钥、JSON 请求体，有时末尾还带着 `| jq` 管道。
 
-在 **MyCurl** 里，你只需要复制整段指令，切回应用按 **`⌘I`**（或直接 **`⌘V`**）：
+用传统接口工具，你得先登录账号，新建请求，把网址和 Header 拆开填好，再把 Token 和 JSON 粘进去。过几天换个 Key，又要去聊天记录里翻。
+
+在 MyCurl 里，复制整段 `curl` 命令，切回软件按 `⌘V` 就行。
+
+<div align="center">
+  <img src="assets/mock-paste-curl.png" width="96%" alt="粘贴 cURL 智能归档预览" />
+</div>
 
 ```bash
-curl -sS 'https://api.example.com/v1/chat/completions' \
-  -H "Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+curl -sS 'https://api.openai.com/v1/chat/completions' \
+  -H "Authorization: Bearer sk-demo-9f8e7d6c5b4a3210fedcba9876543210" \
   -H 'Content-Type: application/json' \
   --data-raw '{
-    "model": "model-j",
+    "model": "gpt-4o-mini",
     "messages": [{ "role": "user", "content": "你是什么模型" }],
     "stream": false
   }' | jq -r '.choices[0].message.content // .error.message // .'
 ```
 
-MyCurl 会自动为你完成整套归档：
+点一下「归档并打开」，软件会自动做好这几件事：
 
-| 自动识别项 | 归档结果 |
-| --- | --- |
-| **域名目录** | 自动创建或归入对应站点目录（如 `api.example.com`、`OpenAI · api.openai.com`、`Google Gemini` 等） |
-| **路由前缀** | 自动提取 `https://api.example.com/v1` 为目录变量 `{{base_url}}`，请求地址转为 `{{base_url}}/chat/completions` |
-| **敏感密钥** | 自动识别 `Bearer`、`x-api-key`、`?key=`、Basic 密码及 `$OPENAI_API_KEY`，收纳为遮罩保护的目录密钥 `{{api_key}}`（同站点同密钥自动复用） |
-| **请求体与命名** | JSON 自动格式化，并根据路由 / 模型名 / Prompt 自动生成中文请求名（如 `对话补全 · model-j · 你是什么模型`） |
-| **`jq` 响应筛选** | 自动捕获管道中的 `.choices[0].message.content // .error.message // .` 并填入响应筛选栏，一键切换筛选结果与原始 JSON |
-| **接口文档** | 自动生成密钥脱敏后的 Markdown 请求文档与目录概览文档，支持一键导出整套 `.md` |
+- **按域名建好目录**：识别出 OpenAI 或 DeepSeek 这类常用接口，或是你自己的服务域名，自动归入对应目录并提取 `{{base_url}}`。
+- **提取并打码密钥**：把明文 `sk-...` 或 `x-api-key` 收纳为目录密钥变量 `{{api_key}}`。同一站点的相同密钥会自动复用，截图或录屏时不怕漏 Key。
+- **自动生成中文名**：根据接口路径、模型名和提问内容，直接命名为 `对话补全 · gpt-4o-mini · 你是什么模型`，不用在一堆 `New Request` 里挨个找。
+- **保留 `jq` 筛选规则**：命令末尾带的 `| jq` 表达式会自动填进右侧响应筛选栏，只看核心字段，随时也能切回完整 JSON。
 
----
-
-## 核心特性
-
-- **原生 Rust + Tauri v2 引擎**：底层基于 `reqwest` + `rustls` + `tokio`，体积轻巧（macOS `.dmg` 约 3 MB），无 CORS 限制，支持 gzip / brotli / deflate 自动解压、HTTP/SOCKS 代理、`-k` 忽略自签名证书、重定向链追踪与跨域认证头剥离。
-- **AI SSE 流式对话视图**：通过 Tauri v2 IPC Channel 实时流式推送响应帧，自动拼接 OpenAI、DeepSeek（含思考过程 `reasoning_content`）、Anthropic Claude、Google Gemini 的流式输出，亦可切换查看原始事件流。
-- **多层级变量与密钥库**：支持 `全局变量` < `当前子环境` < `文件夹变量` 覆盖链，输入框与 CodeMirror 6 编辑器内实时高亮 `{{变量}}` 并支持 `{{` 自动补全（内置 `{{$uuid}}`、`{{$timestamp}}`、`{{$isoTimestamp}}` 等动态变量），提供跨目录「密钥总览」。
-- **多形态 cURL 兼容**：支持 bash / zsh 反斜杠续行、Markdown 代码块、`export VAR=...`、Windows cmd `^` 转义（Chrome 复制为 cURL）、批量多条粘贴、以及剪贴板自动检测。
-- **代码生成与集合互通**：一键导出为 cURL（脱敏 / 保留 `{{变量}}` / 明文）、JavaScript `fetch`、Python `requests` 与 Markdown 文档；支持导入 Postman Collection v2.1 与 MyCurl 备份（可选脱敏）。
-- **克制的桌面交互**：深色 / 浅色 / 跟随系统主题、左右 / 上下双栏布局切换、可拖拽面板、每请求保留最近 30 条响应历史。
+<div align="center">
+  <img src="assets/mock-archived.png" width="96%" alt="一键归档后的界面" />
+</div>
 
 ---
 
-## 快捷操作
+## 几个顺手的设计
+
+**大模型流式返回直接看正文**
+调 AI 接口不用对着满屏的 `data: {"choices":[...]}` 一行行找字。MyCurl 会把 SSE 流式数据直接拼成完整回答，DeepSeek 和 Claude 的思考过程（Reasoning）也会单独折叠展示，同时记录首字耗时与总耗时。
+
+**密钥直接下拉选，不用手敲括号**
+在认证栏配 Bearer Token 或管理目录密钥时，输入框旁边自带「选择密钥」下拉菜单。点开就能选已有的 `{{api_key}}` 并查看当前生效值，也可以直接跳去密钥库修改。
+
+<div align="center">
+  <img src="assets/mock-auth-picker.png" width="96%" alt="认证栏密钥选择器与剪贴板 cURL 感应" />
+</div>
+
+**一键导出脱敏文档和代码**
+接口调通后要发给同事或贴进文档，可以按单条请求或整个目录导出 Markdown 接口文档，里面的密钥默认自动打码。也可以随时转成脱敏 `cURL`、前端 `fetch` 或 Python `requests` 代码。
+
+**3 MB 安装包，数据只留在本地**
+原生 macOS 应用，体积只有 3 MB 左右，点开即用。不强制注册登录，所有接口数据、密钥和请求历史都保存在本机 `~/.mycurl/` 目录下，自带本地自动备份。支持直接导入 Postman Collection v2.1。
+
+---
+
+## 近期更新
+
+<!-- 以后有新特性，直接在下面列表追加一行，或替换上方截图即可 -->
+
+- [x] **剪贴板 cURL 自动感应**：复制单条或多条 `curl` 后切回软件，顶栏直接提示一键归档。
+- [x] **认证栏密钥选择器**：在请求与目录认证页下拉选用已有密钥变量，支持一键跳转编辑。
+- [x] **工作区与环境切换菜单**：顶栏直接切换不同项目工作区，或切换开发与生产环境。
+- [x] **原生风格确认弹窗**：删除目录或清空工作区时提供防误触确认与快捷键支持。
+
+---
+
+## 常用快捷键
 
 | 快捷键 | 功能 |
-| --- | --- |
-| `⌘I` / `⌘⇧V` | 打开「粘贴 cURL 智能归档」窗口 |
-| `⌘V`（非输入区 / URL 栏） | 检测到 cURL 命令时自动弹出智能归档预览 |
-| `⌘K` | 打开全局命令与接口快速跳转面板 |
+| :---: | :--- |
+| `⌘I` 或 `⌘V` | 粘贴 `curl` 并打开归档预览（非输入框焦点时直接按 `⌘V`） |
+| `⌘K` | 搜索接口或执行快捷命令 |
 | `⌘↵` | 发送当前请求 |
-| `⌘N` | 新建空白 HTTP 请求 |
+| `⌘N` | 新建空白请求 |
+| `⌘/` | 切换浅色 / 深色外观 |
 
 ---
 
-## 快速开始
+## 下载与运行
 
-### 环境要求
-- **Node.js** 20+
-- **Rust** stable（[rustup.rs](https://rustup.rs/)，含 `rustfmt` 与 `clippy`）
-- **macOS** 11+ 与 Xcode Command Line Tools（用于打包原生 `.app` / `.dmg`）
+直接用安装包的话，去右侧 [**Releases**](../../releases) 页面下载最新的 macOS `.dmg`（支持 Apple Silicon 与 Intel），拖进应用程序即可。
 
-### 安装与运行
+如果想从源码本地运行或自己打包（需 Node.js 20+ 和 Rust 环境）：
 
 ```bash
-# 1. 安装前端依赖
+git clone https://github.com/JASON-QWeb/MyCurl.git
+cd MyCurl
 npm install
 
-# 2. 启动 Rust + Tauri macOS 桌面应用（开发热更新）
+# 启动桌面开发模式
 npm run tauri:dev
-```
 
-> 若仅需在浏览器中快速调试前端界面，也可使用内置的 Node 本地代理模式：`npm start`（或 `npm run dev`）。
-
-### 构建 macOS 桌面应用
-
-```bash
-# 构建当前架构的 macOS .app 与 .dmg
+# 打包 macOS .app 与 .dmg
 npm run tauri:build:mac
-
-# 构建 Apple Silicon (M1–M4) + Intel 通用 Universal 安装包
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-npm run tauri:build:universal
-```
-
-产物位置：
-- 应用包：`src-tauri/target/release/bundle/macos/MyCurl.app`
-- 安装镜像：`src-tauri/target/release/bundle/dmg/MyCurl_<version>_<arch>.dmg`
-
----
-
-## CI/CD 自动化流水线
-
-仓库已配置完整的 GitHub Actions 工作流（位于 [`.github/workflows/`](.github/workflows)）：
-
-1. **持续集成（`ci.yml`）**
-   - 推送或 PR 至 `main` / `master` 时自动运行：
-     - 前端 TypeScript 类型检查、Vitest 单元测试、Vite 生产构建
-     - Rust `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`
-     - macOS `.app` 与 `.dmg` 真实打包验证并上传 CI Artifact
-2. **macOS 发版（`release-macos.yml`）**
-   - 推送 `v*` 标签（如 `git tag v0.1.0 && git push origin v0.1.0`）或在 Actions 页面手动触发 `workflow_dispatch`（可选 `universal-apple-darwin` / `aarch64-apple-darwin` / `x86_64-apple-darwin`）。
-   - 自动产出 `.dmg`、`.app.tar.gz` 与 `SHA256SUMS.txt` 并发布至 GitHub Releases。
-   - **可选 Apple 签名与公证**：在仓库 `Settings → Secrets` 中配置 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` 即可自动启用正式签名与公证；未配置时默认构建未签名安装包。
-
----
-
-## 项目结构
-
-```text
-MyCurl/
-├── src-tauri/                 # Rust + Tauri v2 桌面端核心
-│   ├── src/
-│   │   ├── lib.rs             # Tauri IPC 命令注册与剪贴板集成
-│   │   ├── http_engine.rs     # reqwest + rustls 流式 HTTP 引擎与取消控制
-│   │   └── storage.rs         # 原子持久化、自动滚动备份与响应历史
-│   ├── icons/                 # macOS .icns / Windows .ico / PNG 图标集
-│   └── tauri.conf.json        # Tauri 应用与 macOS DMG 打包配置
-├── src/                       # React + TypeScript 前端界面
-│   ├── lib/                   # cURL 解析、智能归档、jq 筛选、SSE 解析、代码/文档导出
-│   ├── store/                 # Zustand 状态管理与持久化调度
-│   └── components/            # 侧边栏、请求/响应面板、目录文档视图、智能导入弹窗等
-├── server/                    # 浏览器预览模式降级代理（Node + Undici）
-├── scripts/gen-icons.mjs      # 图标生成脚本（从 assets/icon-source.png 生成全套图标）
-├── tests/                     # Vitest 单元测试
-└── .github/workflows/         # CI 与 macOS Release GitHub Actions
 ```
 
 ---
 
-## 隐私与本地数据
+## 开源协议
 
-- 所有工作区、目录、环境变量、密钥与响应历史**仅保存在本机** `~/.mycurl/` 目录（可通过环境变量 `MYCURL_DATA_DIR` 自定义）：
-  - `~/.mycurl/data.json`：工作区主数据（原子写入，避免异常退出损坏）
-  - `~/.mycurl/backups/`：自动定期滚动备份（保留最近 30 份）
-  - `~/.mycurl/history/`：按请求分别保存的最近 30 条响应记录
-- 不会向任何第三方服务器发送遥测或同步数据。
-
----
-
-## 常用开发命令
-
-```bash
-npm run typecheck          # TypeScript 类型检查
-npm test                   # 运行前端单元测试（Vitest）
-npm run rust:test          # 运行 Rust 核心单元测试（cargo test）
-npm run tauri:dev          # 启动 Rust + Tauri 桌面端开发模式
-npm run tauri:build:mac    # 打包 macOS .app 与 .dmg
-node scripts/gen-icons.mjs # 从 assets/icon-source.png 重新生成全套应用图标
-```
+基于 [MIT License](LICENSE) 开源。

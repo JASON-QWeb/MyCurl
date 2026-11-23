@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Auth, Folder, Variable } from '../lib/types';
 import { resolveVariables } from '../lib/template';
@@ -18,10 +18,25 @@ import {
 } from './Icons';
 
 export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
-  const { data, updateFolder, createRequest, selectRequest, setDocModal, toast } = useAppStore();
-  const [tab, setTab] = useState<'overview' | 'vars' | 'auth' | 'headers'>('overview');
+  const { data, selection, updateFolder, deleteFolder, createRequest, selectRequest, setDocModal, setEnvModal, confirm, toast } = useAppStore();
+  const initialTab = selection?.kind === 'folder' && selection.id === folder.id && selection.tab ? selection.tab : 'overview';
+  const [tab, setTab] = useState<'overview' | 'vars' | 'auth' | 'headers'>(initialTab);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [editingDoc, setEditingDoc] = useState(false);
+
+  useEffect(() => {
+    if (selection?.kind === 'folder' && selection.id === folder.id && selection.tab) {
+      setTab(selection.tab);
+    }
+  }, [selection, folder.id]);
+
+  const authVarPickerActions = useMemo(
+    () => [
+      { label: '编辑当前文件夹变量与密钥…', onClick: () => setTab('vars') },
+      { label: '打开环境变量与密钥库…', onClick: () => setEnvModal(true) },
+    ],
+    [setEnvModal],
+  );
 
   const vars = useMemo(() => resolveVariables(data, folder.workspaceId, folder.id), [data, folder.workspaceId, folder.id]);
   const childRequests = useMemo(
@@ -86,6 +101,23 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="btn btn-ghost"
+            style={{ color: 'var(--danger)' }}
+            title="删除文件夹"
+            onClick={async () => {
+              const ok = await confirm({
+                title: '删除文件夹',
+                message: `确定删除文件夹「${folder.name}」及其中的所有子目录和请求吗？此操作无法撤销。`,
+                confirmLabel: '删除',
+                danger: true,
+              });
+              if (ok) deleteFolder(folder.id);
+            }}
+          >
+            <IconTrash size={14} />
+            删除
+          </button>
           <button className="btn" onClick={() => setDocModal({ scope: 'folder', folderId: folder.id })}>
             <IconDoc size={14} />
             导出 Markdown 文档
@@ -391,13 +423,16 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
             {folder.auth.type === 'bearer' && (
               <>
                 <div className="form-row">
-                  <label>令牌（支持 {'{{api_key}}'}）</label>
+                  <label>令牌（可直接输入，或下拉选择已有密钥 / 变量）</label>
                   <TemplateInput
                     value={folder.auth.token ?? ''}
                     onChange={(v) => updateAuth({ token: v })}
                     vars={vars}
                     placeholder="{{api_key}}"
                     bordered
+                    showVarPicker
+                    varPickerLabel="选择密钥"
+                    varPickerActions={authVarPickerActions}
                   />
                 </div>
                 <div className="form-row">
@@ -418,7 +453,15 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
                 </div>
                 <div className="form-row">
                   <label>密码</label>
-                  <TemplateInput value={folder.auth.password ?? ''} onChange={(v) => updateAuth({ password: v })} vars={vars} bordered />
+                  <TemplateInput
+                    value={folder.auth.password ?? ''}
+                    onChange={(v) => updateAuth({ password: v })}
+                    vars={vars}
+                    bordered
+                    showVarPicker
+                    varPickerLabel="选择密钥"
+                    varPickerActions={authVarPickerActions}
+                  />
                 </div>
               </>
             )}
@@ -435,7 +478,15 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
                 </div>
                 <div className="form-row">
                   <label>值</label>
-                  <TemplateInput value={folder.auth.value ?? ''} onChange={(v) => updateAuth({ value: v })} vars={vars} bordered />
+                  <TemplateInput
+                    value={folder.auth.value ?? ''}
+                    onChange={(v) => updateAuth({ value: v })}
+                    vars={vars}
+                    bordered
+                    showVarPicker
+                    varPickerLabel="选择密钥"
+                    varPickerActions={authVarPickerActions}
+                  />
                 </div>
                 <div className="form-row">
                   <label>位置</label>
