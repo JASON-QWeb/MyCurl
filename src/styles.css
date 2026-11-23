@@ -103,6 +103,7 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
   margin: 0;
   padding: 0;
   background: var(--bg);
@@ -150,13 +151,14 @@ button {
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
 .topbar {
   height: 44px;
+  width: 100%;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -166,6 +168,7 @@ button {
   gap: 8px;
   flex-shrink: 0;
   user-select: none;
+  overflow: hidden;
 }
 
 /* macOS Tauri Overlay 标题栏：给左上角红黄绿交通灯留出空间 */
@@ -179,6 +182,15 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+.topbar-left,
+.topbar-right {
+  flex-shrink: 0;
+}
+.topbar-center {
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
 .brand {
@@ -213,6 +225,8 @@ button {
 .main-area {
   flex: 1;
   display: flex;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -416,7 +430,7 @@ button {
   flex-direction: column;
   flex-shrink: 0;
   min-width: 190px;
-  max-width: 480px;
+  max-width: min(460px, 42vw);
   user-select: none;
 }
 
@@ -587,6 +601,8 @@ button {
 .workspace-panes {
   flex: 1;
   display: flex;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -595,7 +611,17 @@ button {
   flex-direction: column;
 }
 
+.pane-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .pane {
+  flex: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1053,11 +1079,14 @@ button {
 
 .editor-fill {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   position: relative;
 }
 .editor-fill .cm-editor {
+  width: 100%;
   height: 100%;
   outline: none !important;
 }
@@ -1232,6 +1261,8 @@ button {
 
 .folder-view {
   flex: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1541,6 +1572,10 @@ button {
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
+}
+
+.app-shell.is-dragging {
+  user-select: none;
 }
 
 @media (max-width: 900px) {

@@ -42,7 +42,7 @@ const JQ_PRESETS = [
   { label: 'Gemini', expr: '.candidates[0].content.parts[0].text // .error.message // .' },
 ];
 
-export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req, dark }) => {
+export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?: boolean }> = ({ req, dark, vertical }) => {
   const {
     data,
     histories,
@@ -117,8 +117,16 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ re
     return q ? resp.headers.filter(([k, v]) => k.toLowerCase().includes(q) || v.toLowerCase().includes(q)) : resp.headers;
   }, [resp, headerQuery]);
 
+  const isVertical = vertical ?? data.settings.layout === 'vertical';
+
   return (
-    <section className="pane" style={{ borderLeft: data.settings.layout === 'horizontal' ? '1px solid var(--border)' : 'none', borderTop: data.settings.layout === 'vertical' ? '1px solid var(--border)' : 'none' }}>
+    <section
+      className="pane"
+      style={{
+        borderLeft: isVertical ? 'none' : '1px solid var(--border)',
+        borderTop: isVertical ? '1px solid var(--border)' : 'none',
+      }}
+    >
       {/* 状态栏 */}
       <div className="resp-status-bar">
         <div className="status-group">

@@ -35,7 +35,14 @@ export const App: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState(data.settings.sidebarWidth || 270);
   const [splitRatio, setSplitRatio] = useState(data.settings.responsePaneRatio || 0.5);
   const [dragging, setDragging] = useState<'sidebar' | 'split' | null>(null);
+  const [narrowWindow, setNarrowWindow] = useState(() => window.innerWidth <= 900);
   const panesRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onResize = () => setNarrowWindow(window.innerWidth <= 900);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     init();
@@ -125,15 +132,18 @@ export const App: React.FC = () => {
     };
   }, [createRequest, openImportModal, sendRequest, setClipboardCurl, setCommandPalette]);
 
+  const isVert = data.settings.layout === 'vertical' || narrowWindow;
+
   // 拖拽调整侧边栏宽度与双栏比例
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: MouseEvent) => {
       if (dragging === 'sidebar') {
-        setSidebarWidth(clamp(e.clientX, 195, 460));
+        const maxW = Math.min(460, Math.floor(window.innerWidth * 0.42));
+        setSidebarWidth(clamp(e.clientX, 195, Math.max(200, maxW)));
       } else if (dragging === 'split' && panesRef.current) {
         const rect = panesRef.current.getBoundingClientRect();
-        if (data.settings.layout === 'horizontal') {
+        if (!isVert) {
           setSplitRatio(clamp((e.clientX - rect.left) / rect.width, 0.25, 0.75));
         } else {
           setSplitRatio(clamp((e.clientY - rect.top) / rect.height, 0.25, 0.75));
@@ -151,14 +161,13 @@ export const App: React.FC = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [dragging, sidebarWidth, splitRatio, data.settings.layout, updateSettings]);
+  }, [dragging, sidebarWidth, splitRatio, isVert, updateSettings]);
 
   const activeReq = selection?.kind === 'request' ? data.requests.find((r) => r.id === selection.id) ?? null : null;
   const activeFolder = selection?.kind === 'folder' ? data.folders.find((f) => f.id === selection.id) ?? null : null;
-  const isVert = data.settings.layout === 'vertical';
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${dragging ? 'is-dragging' : ''}`}>
       <TopBar />
 
       <div className="main-area">
@@ -173,13 +182,9 @@ export const App: React.FC = () => {
         ) : activeReq ? (
           <div ref={panesRef} className={`workspace-panes ${isVert ? 'vertical' : ''}`}>
             <div
+              className="pane-slot"
               style={{
-                flexBasis: `${splitRatio * 100}%`,
-                flexGrow: 0,
-                flexShrink: 0,
-                display: 'flex',
-                minWidth: 0,
-                minHeight: 0,
+                flex: `0 0 calc(${splitRatio * 100}% - 2px)`,
               }}
             >
               <RequestPane key={activeReq.id} req={activeReq} dark={isDark} />
@@ -188,8 +193,8 @@ export const App: React.FC = () => {
               className={`resizer ${isVert ? 'resizer-h' : ''} ${dragging === 'split' ? 'dragging' : ''}`}
               onMouseDown={() => setDragging('split')}
             />
-            <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
-              <ResponsePane key={activeReq.id} req={activeReq} dark={isDark} />
+            <div className="pane-slot" style={{ flex: '1 1 0%' }}>
+              <ResponsePane key={activeReq.id} req={activeReq} dark={isDark} vertical={isVert} />
             </div>
           </div>
         ) : (

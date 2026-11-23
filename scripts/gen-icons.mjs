@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * 从 assets/icon-source.png 生成全套 MyCurl 图标（应用 macOS Squircle 圆角蒙版 + 微高光边框）：
+ * 程序化渲染 MyCurl 终端风格（Terminal）macOS 桌面应用图标
+ * 输出：
+ *  - assets/icon-source.png (1024x1024 透明底 Squircle 主图)
  *  - src-tauri/icons/{32x32.png, 128x128.png, 128x128@2x.png, icon.png, icon.icns, icon.ico}
- *  - public/icon.png（供前端 favicon 与顶栏品牌图标使用）
+ *  - public/icon.png (256x256 供前端 favicon 与顶栏品牌图标使用)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,13 +13,14 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const sourcePath = path.join(root, 'assets', 'icon-source.png');
+const assetsDir = path.join(root, 'assets');
 const iconsDir = path.join(root, 'src-tauri', 'icons');
 const publicDir = path.join(root, 'public');
+fs.mkdirSync(assetsDir, { recursive: true });
 fs.mkdirSync(iconsDir, { recursive: true });
 fs.mkdirSync(publicDir, { recursive: true });
 
-// ---- PNG 编解码 ----
+// ---- PNG 编码 ----
 const crcTable = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
   let c = n;
@@ -42,7 +45,7 @@ function encodePng(width, height, rgba) {
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;
-  ihdr[9] = 6; // RGBA
+  ihdr[9] = 6;
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
     raw[y * (width * 4 + 1)] = 0;
@@ -57,130 +60,219 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
-function paeth(a, b, c) {
-  const p = a + b - c;
-  const pa = Math.abs(p - a);
-  const pb = Math.abs(p - b);
-  const pc = Math.abs(p - c);
-  if (pa <= pb && pa <= pc) return a;
-  if (pb <= pc) return b;
-  return c;
+// ---- 数学 & SDF 工具 ----
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const mix = (a, b, t) => a + (b - a) * t;
+const smoothstep = (e0, e1, x) => {
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+function sdSquircle(px, py, half, p = 4.8) {
+  const ax = Math.abs(px) / half;
+  const ay = Math.abs(py) / half;
+  const r = Math.pow(Math.pow(ax, p) + Math.pow(ay, p), 1 / p);
+  return (r - 1.0) * half;
 }
 
-function decodePng(buf) {
-  let off = 8;
-  let width = 0;
-  let height = 0;
-  let colorType = 0;
-  const idats = [];
-  while (off < buf.length) {
-    const len = buf.readUInt32BE(off);
-    const type = buf.subarray(off + 4, off + 8).toString('ascii');
-    const data = buf.subarray(off + 8, off + 8 + len);
-    if (type === 'IHDR') {
-      width = data.readUInt32BE(0);
-      height = data.readUInt32BE(4);
-      colorType = data[9];
-    } else if (type === 'IDAT') {
-      idats.push(data);
-    } else if (type === 'IEND') {
-      break;
-    }
-    off += 12 + len;
-  }
-  const bpp = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
-  if (!bpp) throw new Error(`Unsupported PNG colorType: ${colorType}`);
-  const raw = zlib.inflateSync(Buffer.concat(idats));
-  const stride = width * bpp;
-  const recon = Buffer.alloc(height * stride);
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)];
-    const rowOff = y * stride;
-    const rawOff = y * (stride + 1) + 1;
-    for (let x = 0; x < stride; x++) {
-      const val = raw[rawOff + x];
-      const left = x >= bpp ? recon[rowOff + x - bpp] : 0;
-      const up = y > 0 ? recon[rowOff - stride + x] : 0;
-      const upLeft = x >= bpp && y > 0 ? recon[rowOff - stride + x - bpp] : 0;
-      let out = val;
-      if (filter === 1) out = (val + left) & 0xff;
-      else if (filter === 2) out = (val + up) & 0xff;
-      else if (filter === 3) out = (val + ((left + up) >> 1)) & 0xff;
-      else if (filter === 4) out = (val + paeth(left, up, upLeft)) & 0xff;
-      recon[rowOff + x] = out;
-    }
-  }
-  const rgba = Buffer.alloc(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    rgba[i * 4] = recon[i * bpp];
-    rgba[i * 4 + 1] = recon[i * bpp + 1];
-    rgba[i * 4 + 2] = recon[i * bpp + 2];
-    rgba[i * 4 + 3] = bpp === 4 ? recon[i * bpp + 3] : 255;
-  }
-  return { width, height, rgba };
+function sdRoundedRect(px, py, cx, cy, hw, hh, r) {
+  const qx = Math.abs(px - cx) - hw + r;
+  const qy = Math.abs(py - cy) - hh + r;
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-// macOS Apple HIG 风格 Squircle 蒙版（内缩约 9% 留白 + 柔和玻璃边缘高光）
-function applyMacSquircle(src) {
-  const { width: w, height: h, rgba } = src;
-  const out = Buffer.alloc(w * h * 4);
-  const half = 0.825; // Apple HIG 824/1024 视觉比例
-  const p = 4.8; // 超椭圆曲率
-  const aa = 2.0 / w;
+function sdSegment(px, py, ax, ay, bx, by) {
+  const pax = px - ax, pay = py - ay;
+  const bax = bx - ax, bay = by - ay;
+  const h = clamp((pax * bax + pay * bay) / (bax * bax + bay * bay), 0, 1);
+  return Math.hypot(pax - bax * h, pay - bay * h);
+}
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const nx = ((x + 0.5) / w) * 2 - 1;
-      const ny = ((y + 0.5) / h) * 2 - 1;
+function blendOver(dstR, dstG, dstB, srcR, srcG, srcB, a) {
+  return [dstR * (1 - a) + srcR * a, dstG * (1 - a) + srcG * a, dstB * (1 - a) + srcB * a];
+}
 
-      // 从原图略微放大采样（适配 82.5% 图标内框，使主体符号更饱满）
-      const sx = Math.max(0, Math.min(w - 1, Math.round((((nx / half) * 0.94 + 1) * 0.5) * (w - 1))));
-      const sy = Math.max(0, Math.min(h - 1, Math.round((((ny / half) * 0.94 + 1) * 0.5) * (h - 1))));
+/**
+ * 渲染 1024x1024 精雕 macOS 终端风格图标：
+ * - 外层深空灰金属质感 Squircle 机壳 + 平滑玻璃高光倒角 + 柔和底部投影
+ * - 内嵌暗黑 OLED 终端屏幕 + 顶部 macOS 经典三色交通灯窗口栏
+ * - 主体：高对比度发光终端提示符 `>_`（翡翠绿到电光青渐变 + 真实荧光漫反射光晕）
+ * - 底部微弱终端命令装饰条，整体在 22px 到 1024px 均清晰锐利
+ */
+function renderTerminalIcon(size) {
+  const rgba = Buffer.alloc(size * size * 4);
+  const aa = 1.6 / size;
+  const outerHalf = 0.825; // Apple HIG 标准留白比例
+  const innerHalf = 0.742; // 金属边框厚度
 
-      const rNorm = Math.pow(Math.pow(Math.abs(nx) / half, p) + Math.pow(Math.abs(ny) / half, p), 1 / p);
-      const dist = (rNorm - 1.0) * half;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const nx = ((x + 0.5) / size) * 2 - 1;
+      const ny = ((y + 0.5) / size) * 2 - 1;
 
-      // 外侧柔光投影（底部偏移）
-      const rShadow = Math.pow(
-        Math.pow(Math.abs(nx) / (half + 0.01), p) + Math.pow(Math.abs(ny - 0.022) / (half + 0.01), p),
-        1 / p,
-      );
-      const shadowDist = (rShadow - 1.0) * half;
+      const dOuter = sdSquircle(nx, ny, outerHalf, 4.8);
+      const outerAlpha = clamp(0.5 - dOuter / (aa * 2), 0, 1);
 
-      const idx = (y * w + x) * 4;
-      const alpha = Math.max(0, Math.min(1, 0.5 - dist / (aa * 2)));
+      const idx = (y * size + x) * 4;
 
-      if (alpha > 0) {
-        const si = (sy * w + sx) * 4;
-        let r = rgba[si];
-        let g = rgba[si + 1];
-        let b = rgba[si + 2];
-
-        // 精细玻璃高光内描边（由上到下平滑过渡，无接缝）
-        const rimIntensity = 0.08 + 0.16 * Math.pow(Math.max(0, (1 - ny) * 0.5), 1.4);
-        const rim = Math.exp(-Math.pow((dist + 0.012) / 0.01, 2)) * rimIntensity;
-        r = Math.min(255, r + 210 * rim);
-        g = Math.min(255, g + 235 * rim);
-        b = Math.min(255, b + 255 * rim);
-
-        out[idx] = Math.round(r);
-        out[idx + 1] = Math.round(g);
-        out[idx + 2] = Math.round(b);
-        out[idx + 3] = Math.round(alpha * 255);
-      } else if (shadowDist < 0.09) {
-        const sAlpha = Math.max(0, 1 - Math.max(0, shadowDist) / 0.09);
-        const sa = Math.pow(sAlpha, 2.2) * 0.28;
-        out[idx] = 0;
-        out[idx + 1] = 0;
-        out[idx + 2] = 0;
-        out[idx + 3] = Math.round(sa * 255);
+      if (outerAlpha <= 0) {
+        // 底部柔和环境阴影
+        const dShadow = sdSquircle(nx, ny - 0.024, outerHalf + 0.008, 4.8);
+        if (dShadow < 0.095) {
+          const t = clamp(1 - Math.max(0, dShadow) / 0.095, 0, 1);
+          const sa = Math.pow(t, 2.3) * 0.3;
+          rgba[idx] = 0;
+          rgba[idx + 1] = 0;
+          rgba[idx + 2] = 0;
+          rgba[idx + 3] = Math.round(sa * 255);
+        }
+        continue;
       }
+
+      // 1. 外部深色阳极氧化金属机身
+      const gradT = clamp((ny + outerHalf) / (outerHalf * 2), 0, 1);
+      const diagT = clamp((nx + ny + 1.65) / 3.3, 0, 1);
+      let r = mix(54, 24, gradT) + mix(8, 0, diagT);
+      let g = mix(60, 27, gradT) + mix(10, 0, diagT);
+      let b = mix(74, 36, gradT) + mix(14, 0, diagT);
+
+      // 金属外框顶部微玻璃反光
+      const rimStrength = 0.1 + 0.24 * Math.pow(clamp((1 - ny) * 0.5, 0, 1), 1.6);
+      const outerRim = Math.exp(-Math.pow((dOuter + 0.013) / 0.011, 2)) * rimStrength;
+      r += 215 * outerRim;
+      g += 230 * outerRim;
+      b += 255 * outerRim;
+
+      // 2. 内嵌 OLED 终端屏幕区域
+      const dInner = sdSquircle(nx, ny, innerHalf, 4.6);
+      const innerAlpha = clamp(0.5 - dInner / (aa * 2), 0, 1);
+
+      // 屏幕凹槽内边缘微弱高光（下沿反光）与暗边（上沿阴影）
+      const bezelGlow = Math.exp(-Math.pow((dInner - 0.008) / 0.009, 2));
+      if (bezelGlow > 0.01 && innerAlpha < 0.99) {
+        const lowerLight = smoothstep(-0.2, 0.8, ny) * 0.14;
+        const upperShade = smoothstep(0.2, -0.8, ny) * 0.35;
+        r = r * (1 - upperShade * bezelGlow) + 190 * lowerLight * bezelGlow;
+        g = g * (1 - upperShade * bezelGlow) + 210 * lowerLight * bezelGlow;
+        b = b * (1 - upperShade * bezelGlow) + 235 * lowerLight * bezelGlow;
+      }
+
+      if (innerAlpha > 0) {
+        // 深邃碳黑终端屏幕底色
+        const scrT = clamp((ny + innerHalf) / (innerHalf * 2), 0, 1);
+        let sr = mix(17, 9, scrT);
+        let sg = mix(22, 12, scrT);
+        let sb = mix(30, 18, scrT);
+
+        // 微妙扫描线纹理（仅在屏幕内容区极轻呈现，增加终端硬件质感）
+        const scan = 0.5 + 0.5 * Math.sin(y * (Math.PI * 2 / (size / 64)));
+        sr += scan * 1.1;
+        sg += scan * 1.6;
+        sb += scan * 1.5;
+
+        // 顶部终端窗口标题栏区域
+        const barY = -0.455;
+        const inHeader = smoothstep(barY + aa * 1.5, barY - aa * 1.5, ny);
+        if (inHeader > 0) {
+          [sr, sg, sb] = blendOver(sr, sg, sb, 34, 40, 52, inHeader * 0.72);
+        }
+        // 标题栏底部分割线
+        const sep = Math.exp(-Math.pow((ny - barY) / (aa * 1.4), 2));
+        [sr, sg, sb] = blendOver(sr, sg, sb, 130, 150, 185, sep * 0.18);
+
+        // 标题栏左上角 macOS 三色窗口控制点
+        const dotY = -0.585;
+        const dotR = 0.037;
+        const dots = [
+          [-0.515, 255, 95, 87],   // 红
+          [-0.402, 254, 188, 46],  // 黄
+          [-0.289, 40, 200, 64],   // 绿
+        ];
+        for (const [dx, dr, dg, db] of dots) {
+          const dd = Math.hypot(nx - dx, ny - dotY) - dotR;
+          const da = clamp(0.5 - dd / (aa * 2), 0, 1);
+          if (da > 0) {
+            // 小圆点顶部微高光
+            const hi = Math.exp(-Math.pow(Math.hypot(nx - dx, ny - (dotY - dotR * 0.35)) / (dotR * 0.7), 2)) * 0.25;
+            [sr, sg, sb] = blendOver(sr, sg, sb, Math.min(255, dr + 255 * hi), Math.min(255, dg + 255 * hi), Math.min(255, db + 255 * hi), da);
+          }
+        }
+
+        // 标题栏右侧极简终端会话指示胶囊（低对比度，不抢主体）
+        const dPill = sdRoundedRect(nx, ny, 0.36, dotY, 0.19, 0.028, 0.028);
+        const pillA = clamp(0.5 - dPill / (aa * 2), 0, 1);
+        if (pillA > 0) {
+          [sr, sg, sb] = blendOver(sr, sg, sb, 148, 163, 184, pillA * 0.16);
+        }
+
+        // 3. 发光终端提示符 `>` 与实心终端光标块 `_`
+        // 中心略偏下（避开顶部标题栏）
+        const cy = 0.08;
+        const dChevTop = sdSegment(nx, ny, -0.45, cy - 0.235, -0.11, cy);
+        const dChevBot = sdSegment(nx, ny, -0.11, cy, -0.45, cy + 0.235);
+        const dChevron = Math.min(dChevTop, dChevBot) - 0.072;
+
+        // 终端光标横杠（微圆角发光胶囊）
+        const dCursor = sdRoundedRect(nx, ny, 0.255, cy + 0.19, 0.215, 0.064, 0.036);
+
+        // 柔和的终端荧光绿/青色漫反射光晕（洒在深色玻璃屏幕上）
+        const glowChev = Math.exp(-Math.max(0, dChevron) * 5.2) * 0.34;
+        const glowCurs = Math.exp(-Math.max(0, dCursor) * 5.0) * 0.3;
+        const ambientGlow = Math.exp(-Math.hypot((nx + 0.05) * 0.9, (ny - cy) * 1.1) * 2.4) * 0.16;
+
+        sr += 20 * (glowChev + ambientGlow) + 30 * glowCurs;
+        sg += 225 * (glowChev + ambientGlow * 0.95) + 210 * glowCurs;
+        sb += 160 * (glowChev + ambientGlow * 0.85) + 245 * glowCurs;
+
+        // 底部两行极淡终端命令装饰条（增强“终端窗口”氛围，不影响小尺寸清晰度）
+        const dLine1 = sdRoundedRect(nx, ny, -0.17, 0.495, 0.28, 0.022, 0.022);
+        const dLine2 = sdRoundedRect(nx, ny, 0.28, 0.495, 0.12, 0.022, 0.022);
+        const lineA = Math.max(clamp(0.5 - dLine1 / (aa * 2), 0, 1), clamp(0.5 - dLine2 / (aa * 2), 0, 1));
+        if (lineA > 0) {
+          [sr, sg, sb] = blendOver(sr, sg, sb, 52, 211, 153, lineA * 0.14);
+        }
+
+        // 绘制锐利发光 `>` 提示符（平滑渐变 + 柔和顶光）
+        const chevA = clamp(0.5 - dChevron / (aa * 2), 0, 1);
+        if (chevA > 0) {
+          const ct = clamp((nx + 0.5) / 0.45, 0, 1);
+          const sheen = smoothstep(0.32, -0.28, ny - cy) * 0.2;
+          const core = smoothstep(-0.01, -0.055, dChevron) * 0.14;
+          const cr = mix(46, 36, ct) + 170 * (sheen + core);
+          const cg = mix(244, 226, ct) + 90 * (sheen + core);
+          const cb = mix(154, 232, ct) + 130 * (sheen + core);
+          [sr, sg, sb] = blendOver(sr, sg, sb, Math.min(255, cr), Math.min(255, cg), Math.min(255, cb), chevA);
+        }
+
+        // 绘制锐利发光 `_` 终端光标
+        const cursA = clamp(0.5 - dCursor / (aa * 2), 0, 1);
+        if (cursA > 0) {
+          const ut = clamp((nx - 0.04) / 0.44, 0, 1);
+          const topSheen = smoothstep(0.05, -0.05, ny - (cy + 0.19)) * 0.22;
+          const ur = mix(45, 118, ut) + 160 * topSheen;
+          const ug = mix(232, 222, ut) + 130 * topSheen;
+          const ub = mix(212, 255, ut) + 120 * topSheen;
+          [sr, sg, sb] = blendOver(sr, sg, sb, Math.min(255, ur), Math.min(255, ug), Math.min(255, ub), cursA);
+        }
+
+        // 屏幕左上方斜向微弱玻璃反光
+        const glassSheen = smoothstep(0.15, -0.95, nx * 0.55 + ny * 0.85) * 0.065;
+        sr += 210 * glassSheen;
+        sg += 230 * glassSheen;
+        sb += 255 * glassSheen;
+
+        [r, g, b] = blendOver(r, g, b, sr, sg, sb, innerAlpha);
+      }
+
+      rgba[idx] = clamp(Math.round(r), 0, 255);
+      rgba[idx + 1] = clamp(Math.round(g), 0, 255);
+      rgba[idx + 2] = clamp(Math.round(b), 0, 255);
+      rgba[idx + 3] = Math.round(outerAlpha * 255);
     }
   }
-  return { width: w, height: h, rgba: out };
+  return { width: size, height: size, rgba };
 }
 
-// 高质量区域平均缩放（带预乘 Alpha，边缘无黑边）
 function resizeRgba(src, dstSize) {
   const { width: sw, height: sh, rgba } = src;
   const out = Buffer.alloc(dstSize * dstSize * 4);
@@ -252,8 +344,7 @@ function encodeIcns(entries) {
   return Buffer.concat([head, body]);
 }
 
-const rawSrc = decodePng(fs.readFileSync(sourcePath));
-const master = applyMacSquircle(rawSrc);
+const master = renderTerminalIcon(1024);
 
 const p16 = resizeRgba(master, 16);
 const p32 = resizeRgba(master, 32);
@@ -263,6 +354,7 @@ const p256 = resizeRgba(master, 256);
 const p512 = resizeRgba(master, 512);
 const p1024 = encodePng(master.width, master.height, master.rgba);
 
+fs.writeFileSync(path.join(assetsDir, 'icon-source.png'), p1024);
 fs.writeFileSync(path.join(iconsDir, '32x32.png'), p32);
 fs.writeFileSync(path.join(iconsDir, '128x128.png'), p128);
 fs.writeFileSync(path.join(iconsDir, '128x128@2x.png'), p256);
@@ -282,4 +374,4 @@ fs.writeFileSync(
 );
 fs.writeFileSync(path.join(publicDir, 'icon.png'), p256);
 
-console.log('Generated new MyCurl icons from assets/icon-source.png');
+console.log('Generated Terminal-style MyCurl icons');
