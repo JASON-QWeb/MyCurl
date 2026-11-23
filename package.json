@@ -2,7 +2,7 @@
   "name": "mycurl",
   "productName": "MyCurl",
   "version": "0.1.0",
-  "description": "MyCurl —— 中文本地优先的 API 调试工具，支持一键粘贴 AI 给出的 cURL 命令并自动归档密钥、路由与请求体。",
+  "description": "粘贴 AI 给的 curl 直接存成接口库，自动收好 API Key，数据只存本地。Paste curl commands into a local-first API client with auto-extracted keys.",
   "private": true,
   "type": "module",
   "scripts": {

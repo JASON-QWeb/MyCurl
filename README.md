@@ -4,13 +4,15 @@
 
 # MyCurl
 
-**把 AI 给的 `curl` 命令直接存成中文接口库**
+**把 AI 给的 `curl` 命令直接存成接口库**
 
 免拆 URL · 自动收好 API Key · 数据只存本地
 
+**简体中文** · [English](README.en.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-111827?style=flat-square)
-![Size](https://img.shields.io/badge/安装包-~3%20MB-3b82f6?style=flat-square)
+![Size](https://img.shields.io/badge/安装包-~4%20MB-3b82f6?style=flat-square)
 ![Local-First](https://img.shields.io/badge/存储-纯本地%20·%20免登录-f59e0b?style=flat-square)
 
 </div>
@@ -25,7 +27,7 @@
 
 ## 解决什么问题
 
-调大模型或接第三方接口时，文档和 AI 给的往往是一整段 `curl` 命令，里面混着明文密钥、JSON 请求体，有时末尾还带着 `| jq` 管道。
+调大模型或接第三方接口时，文档和 AI 给的往往是一整段 `curl` 命令，里面混着明文密钥和 JSON 请求体，有时末尾还带着 `| jq` 管道。
 
 用传统接口工具，你得先登录账号，新建请求，把网址和 Header 拆开填好，再把 Token 和 JSON 粘进去。过几天换个 Key，又要去聊天记录里翻。
 
@@ -36,7 +38,7 @@
 </div>
 
 ```bash
-curl -sS 'https://api.openai.com/v1/chat/completions' \
+curl 'https://api.openai.com/v1/chat/completions' \
   -H "Authorization: Bearer sk-demo-9f8e7d6c5b4a3210fedcba9876543210" \
   -H 'Content-Type: application/json' \
   --data-raw '{
@@ -50,7 +52,7 @@ curl -sS 'https://api.openai.com/v1/chat/completions' \
 
 - **按域名建好目录**：识别出 OpenAI 或 DeepSeek 这类常用接口，或是你自己的服务域名，自动归入对应目录并提取 `{{base_url}}`。
 - **提取并打码密钥**：把明文 `sk-...` 或 `x-api-key` 收纳为目录密钥变量 `{{api_key}}`。同一站点的相同密钥会自动复用，截图或录屏时不怕漏 Key。
-- **自动生成中文名**：根据接口路径、模型名和提问内容，直接命名为 `对话补全 · gpt-4o-mini · 你是什么模型`，不用在一堆 `New Request` 里挨个找。
+- **自动生成好认的接口名**：根据接口路径、模型名和提问内容，直接命名为 `对话补全 · gpt-4o-mini · 你是什么模型`，不用在一堆 `New Request` 里挨个找。
 - **保留 `jq` 筛选规则**：命令末尾带的 `| jq` 表达式会自动填进右侧响应筛选栏，只看核心字段，随时也能切回完整 JSON。
 
 <div align="center">
@@ -71,11 +73,11 @@ curl -sS 'https://api.openai.com/v1/chat/completions' \
   <img src="assets/mock-auth-picker.png" width="96%" alt="认证栏密钥选择器与剪贴板 cURL 感应" />
 </div>
 
-**一键导出脱敏文档和代码**
-接口调通后要发给同事或贴进文档，可以按单条请求或整个目录导出 Markdown 接口文档，里面的密钥默认自动打码。也可以随时转成脱敏 `cURL`、前端 `fetch` 或 Python `requests` 代码。
+**一键导出脱敏文档和干净代码**
+接口调通后要发给同事或贴进文档，可以按单条请求或整个目录导出 Markdown 接口文档，里面的密钥默认自动打码。也可以随时复制纯粹的 `cURL` 命令，或转成前端 `fetch` 与 Python `requests` 代码。
 
-**3 MB 安装包，数据只留在本地**
-原生 macOS 应用，体积只有 3 MB 左右，点开即用。不强制注册登录，所有接口数据、密钥和请求历史都保存在本机 `~/.mycurl/` 目录下，自带本地自动备份。支持直接导入 Postman Collection v2.1。
+**4 MB 安装包，数据只留在本地**
+原生 macOS 应用，体积只有 4 MB 左右，点开即用。不强制注册登录，所有接口数据、密钥和请求历史都保存在本机 `~/.mycurl/` 目录下，自带本地自动备份。支持直接导入 Postman Collection v2.1。
 
 ---
 
@@ -83,10 +85,11 @@ curl -sS 'https://api.openai.com/v1/chat/completions' \
 
 <!-- 以后有新特性，直接在下面列表追加一行，或替换上方截图即可 -->
 
+- [x] **中英双语界面**：设置里支持一键切换简体中文与 English。
+- [x] **清爽 cURL 复制**：复制出来的 `curl` 默认去掉多余的 `-sS -L` 参数，贴进终端或文档更干净。
 - [x] **剪贴板 cURL 自动感应**：复制单条或多条 `curl` 后切回软件，顶栏直接提示一键归档。
 - [x] **认证栏密钥选择器**：在请求与目录认证页下拉选用已有密钥变量，支持一键跳转编辑。
 - [x] **工作区与环境切换菜单**：顶栏直接切换不同项目工作区，或切换开发与生产环境。
-- [x] **原生风格确认弹窗**：删除目录或清空工作区时提供防误触确认与快捷键支持。
 
 ---
 
@@ -98,7 +101,6 @@ curl -sS 'https://api.openai.com/v1/chat/completions' \
 | `⌘K` | 搜索接口或执行快捷命令 |
 | `⌘↵` | 发送当前请求 |
 | `⌘N` | 新建空白请求 |
-| `⌘/` | 切换浅色 / 深色外观 |
 
 ---
 

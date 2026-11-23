@@ -1,7 +1,7 @@
 [package]
 name = "mycurl"
 version = "0.1.0"
-description = "MyCurl — 中文本地优先 API 调试与 AI cURL 智能归档桌面工具"
+description = "MyCurl - 本地优先的 API 调试与 cURL 归档桌面工具"
 authors = ["MyCurl"]
 edition = "2021"
 rust-version = "1.77"
