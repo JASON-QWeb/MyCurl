@@ -519,6 +519,30 @@ button {
   outline: 1.5px dashed var(--accent);
   background: var(--accent-soft);
 }
+.tree-scroll.drag-over-root {
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -3px;
+}
+.drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tree-row .tree-label {
   flex: 1;
   overflow: hidden;

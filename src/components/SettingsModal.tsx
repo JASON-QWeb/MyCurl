@@ -2,8 +2,10 @@ import React, { useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import {
   exportMyCurlJson,
+  importApifoxCollection,
   importMyCurlBackup,
   importPostmanCollection,
+  isApifoxCollection,
   isMyCurlBackup,
   isPostmanCollection,
 } from '../lib/collectionIO';
@@ -55,6 +57,19 @@ export const SettingsModal: React.FC = () => {
     const text = await file.text();
     try {
       const json = JSON.parse(text);
+      if (isApifoxCollection(json)) {
+        const res = importApifoxCollection(data, wsId, json);
+        replaceData(res.data);
+        toast(
+          t(
+            `已导入 Apifox 集合：${res.folderCount} 个目录，${res.requestCount} 条请求`,
+            `Imported Apifox collection: ${res.folderCount} folders, ${res.requestCount} requests`,
+          ),
+          'success',
+        );
+        setSettingsModal(false);
+        return;
+      }
       if (isPostmanCollection(json)) {
         const res = importPostmanCollection(data, wsId, json);
         replaceData(res.data);
@@ -95,8 +110,8 @@ export const SettingsModal: React.FC = () => {
     }
     toast(
       t(
-        '未识别的文件格式（支持 MyCurl JSON、Postman v2.1 JSON 或 cURL 文本文件）',
-        'Unrecognized file format (supports MyCurl JSON, Postman v2.1 JSON, or cURL text)',
+        '未识别的文件格式（支持 Apifox JSON、Postman v2.1 JSON、MyCurl 备份或 cURL 文本）',
+        'Unrecognized file format (supports Apifox JSON, Postman v2.1 JSON, MyCurl backup, or cURL text)',
       ),
       'error',
     );
@@ -297,7 +312,7 @@ export const SettingsModal: React.FC = () => {
               />
               <button className="btn" onClick={() => fileInputRef.current?.click()}>
                 <IconUpload size={13} />
-                {t('导入 Postman / 备份 / cURL 文件', 'Import Postman / Backup / cURL')}
+                {t('导入 Apifox / Postman / 备份 / cURL', 'Import Apifox / Postman / Backup / cURL')}
               </button>
               <button className="btn" onClick={() => downloadJson(true)}>
                 <IconDownload size={13} />

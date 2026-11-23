@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Folder, HttpRequest } from '../lib/types';
 import { copyText, methodColor, methodShort } from '../lib/util';
@@ -59,9 +59,16 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
   const { t } = useI18n();
 
   const [ctx, setCtx] = useState<CtxMenuState | null>(null);
-  const [dragItem, setDragItem] = useState<{ kind: 'request' | 'folder'; id: string } | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<{
+    kind: 'request' | 'folder';
+    id: string;
+    label: string;
+    x: number;
+    y: number;
+    target: { kind: 'folder'; id: string } | { kind: 'root' } | null;
+  } | null>(null);
   const [renaming, setRenaming] = useState<{ kind: 'request' | 'folder'; id: string; text: string } | null>(null);
+  const suppressClickRef = useRef(false);
 
   const curlSecretMode = data.settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
   const copyCurlTitle =
@@ -134,46 +141,129 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     setRenaming(null);
   };
 
-  const canDropIntoFolder = (targetId: string): boolean => {
-    if (!dragItem) return false;
-    if (dragItem.kind === 'request') {
-      const req = requests.find((r) => r.id === dragItem.id);
+  const canDropIntoFolder = (item: { kind: 'request' | 'folder'; id: string }, targetId: string): boolean => {
+    if (item.kind === 'request') {
+      const req = requests.find((r) => r.id === item.id);
       return !!req && req.folderId !== targetId;
     }
-    if (dragItem.id === targetId) return false;
-    const dragged = folders.find((f) => f.id === dragItem.id);
+    if (item.id === targetId) return false;
+    const dragged = folders.find((f) => f.id === item.id);
     if (!dragged || dragged.parentId === targetId) return false;
     // 防止拖入自己的子孙目录
     let cur: string | null = targetId;
     const seen = new Set<string>();
     while (cur && !seen.has(cur)) {
-      if (cur === dragItem.id) return false;
+      if (cur === item.id) return false;
       seen.add(cur);
       cur = folders.find((f) => f.id === cur)?.parentId ?? null;
     }
     return true;
   };
 
+  const canDropToRoot = (item: { kind: 'request' | 'folder'; id: string }): boolean => {
+    if (item.kind === 'request') {
+      return !!requests.find((r) => r.id === item.id)?.folderId;
+    }
+    return !!folders.find((f) => f.id === item.id)?.parentId;
+  };
+
+  const startPointerDrag = (
+    e: React.PointerEvent,
+    item: { kind: 'request' | 'folder'; id: string; label: string },
+  ) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button, input')) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let active = false;
+    let currentTarget: { kind: 'folder'; id: string } | { kind: 'root' } | null = null;
+
+    const resolveTarget = (clientX: number, clientY: number) => {
+      const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+      const folderEl = el?.closest('[data-drop-folder-id]') as HTMLElement | null;
+      if (folderEl) {
+        const targetId = folderEl.getAttribute('data-drop-folder-id')!;
+        if (canDropIntoFolder(item, targetId)) {
+          return { kind: 'folder' as const, id: targetId };
+        }
+        return null;
+      }
+      if (el?.closest('[data-drop-root="true"]') && canDropToRoot(item)) {
+        return { kind: 'root' as const };
+      }
+      return null;
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return;
+        active = true;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+      }
+      currentTarget = resolveTarget(ev.clientX, ev.clientY);
+      setDragState({
+        kind: item.kind,
+        id: item.id,
+        label: item.label,
+        x: ev.clientX,
+        y: ev.clientY,
+        target: currentTarget,
+      });
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      setDragState(null);
+    };
+
+    const onUp = () => {
+      if (active) {
+        suppressClickRef.current = true;
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+        if (currentTarget?.kind === 'folder') {
+          if (item.kind === 'request') moveRequest(item.id, currentTarget.id);
+          else moveFolder(item.id, currentTarget.id);
+        } else if (currentTarget?.kind === 'root') {
+          if (item.kind === 'request') moveRequest(item.id, null);
+          else moveFolder(item.id, null);
+        }
+      }
+      cleanup();
+    };
+
+    const onCancel = () => {
+      cleanup();
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
   const renderRequestRow = (r: HttpRequest, depth: number) => {
     const active = selection?.kind === 'request' && selection.id === r.id;
     const isRenaming = renaming?.kind === 'request' && renaming.id === r.id;
+    const isDragging = dragState?.kind === 'request' && dragState.id === r.id;
     return (
       <div
         key={r.id}
         className={`tree-row ${active ? 'active' : ''}`}
-        style={{ paddingLeft: 10 + depth * 15 }}
-        draggable={!isRenaming}
-        onDragStart={(e) => {
-          e.stopPropagation();
-          setDragItem({ kind: 'request', id: r.id });
-          e.dataTransfer.setData('text/plain', r.id);
-          e.dataTransfer.effectAllowed = 'move';
+        style={{ paddingLeft: 10 + depth * 15, opacity: isDragging ? 0.45 : 1 }}
+        onPointerDown={(e) => {
+          if (!isRenaming) startPointerDrag(e, { kind: 'request', id: r.id, label: r.name || t('未命名请求', 'Untitled Request') });
         }}
-        onDragEnd={() => {
-          setDragItem(null);
-          setDragOverId(null);
+        onClick={() => {
+          if (suppressClickRef.current) return;
+          selectRequest(r.id);
         }}
-        onClick={() => selectRequest(r.id)}
         onDoubleClick={() => setRenaming({ kind: 'request', id: r.id, text: r.name })}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -230,43 +320,21 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     const childReqs = requests.filter((r) => r.folderId === f.id && (q ? matchesReq(r) || f.name.toLowerCase().includes(q) : true));
     const secretCount = f.variables.filter((v) => v.secret && v.enabled).length;
     const isRenaming = renaming?.kind === 'folder' && renaming.id === f.id;
+    const isDragging = dragState?.kind === 'folder' && dragState.id === f.id;
+    const isDropTarget = dragState?.target?.kind === 'folder' && dragState.target.id === f.id;
 
     return (
       <div key={f.id}>
         <div
-          className={`tree-row folder-row ${active ? 'active' : ''} ${dragOverId === f.id ? 'drag-over' : ''}`}
-          style={{ paddingLeft: 6 + depth * 15 }}
-          draggable={!isRenaming}
-          onClick={() => toggleFolder(f.id)}
-          onDragStart={(e) => {
-            e.stopPropagation();
-            setDragItem({ kind: 'folder', id: f.id });
-            e.dataTransfer.setData('text/plain', f.id);
-            e.dataTransfer.effectAllowed = 'move';
+          data-drop-folder-id={f.id}
+          className={`tree-row folder-row ${active ? 'active' : ''} ${isDropTarget ? 'drag-over' : ''}`}
+          style={{ paddingLeft: 6 + depth * 15, opacity: isDragging ? 0.45 : 1 }}
+          onPointerDown={(e) => {
+            if (!isRenaming) startPointerDrag(e, { kind: 'folder', id: f.id, label: f.name });
           }}
-          onDragEnd={() => {
-            setDragItem(null);
-            setDragOverId(null);
-          }}
-          onDragOver={(e) => {
-            if (!canDropIntoFolder(f.id)) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = 'move';
-            setDragOverId(f.id);
-          }}
-          onDragLeave={() => {
-            if (dragOverId === f.id) setDragOverId(null);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (dragItem && canDropIntoFolder(f.id)) {
-              if (dragItem.kind === 'request') moveRequest(dragItem.id, f.id);
-              else moveFolder(dragItem.id, f.id);
-            }
-            setDragItem(null);
-            setDragOverId(null);
+          onClick={() => {
+            if (suppressClickRef.current) return;
+            toggleFolder(f.id);
           }}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -383,18 +451,8 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
       </div>
 
       <div
-        className="tree-scroll"
-        onDragOver={(e) => {
-          if (dragItem) e.preventDefault();
-        }}
-        onDrop={(e) => {
-          if (dragItem && !dragOverId) {
-            e.preventDefault();
-            if (dragItem.kind === 'request') moveRequest(dragItem.id, null);
-            else moveFolder(dragItem.id, null);
-            setDragItem(null);
-          }
-        }}
+        data-drop-root="true"
+        className={`tree-scroll ${dragState?.target?.kind === 'root' ? 'drag-over-root' : ''}`}
       >
         {topFolders.map((f) => renderFolder(f, 0))}
         {rootReqs.map((r) => renderRequestRow(r, 0))}
@@ -420,6 +478,30 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
               : t('浏览器模式', 'Browser')}
         </span>
       </div>
+
+      {/* 拖拽悬浮提示 */}
+      {dragState && (
+        <div
+          className="drag-ghost"
+          style={{ left: dragState.x + 12, top: dragState.y + 12 }}
+        >
+          {dragState.kind === 'folder' && <IconFolder size={13} />}
+          <span>{dragState.label}</span>
+          {dragState.target?.kind === 'folder' && (() => {
+            const tid = dragState.target.id;
+            return (
+              <span style={{ color: 'var(--accent)', fontSize: 11 }}>
+                → {folders.find((f) => f.id === tid)?.name}
+              </span>
+            );
+          })()}
+          {dragState.target?.kind === 'root' && (
+            <span style={{ color: 'var(--accent)', fontSize: 11 }}>
+              → {t('根目录', 'Root')}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 右键菜单 */}
       {ctx && (ctxReq || ctxFolder) && (

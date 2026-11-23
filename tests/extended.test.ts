@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isSseContent, parseSse } from '../src/lib/sse';
 import { exportAsCurl, exportAsFetch, exportAsPython, generateFolderDoc, generateWorkspaceDoc } from '../src/lib/curlExport';
-import { exportMyCurlJson, importPostmanCollection, isPostmanCollection } from '../src/lib/collectionIO';
+import { exportMyCurlJson, importApifoxCollection, importPostmanCollection, isApifoxCollection, isPostmanCollection } from '../src/lib/collectionIO';
 import { prepareRequest } from '../src/lib/requestRunner';
 import { parseCurl } from '../src/lib/curlParser';
 import { applyImport, planImport } from '../src/lib/curlImport';
@@ -200,5 +200,52 @@ describe('集合导入导出与 URL 参数同步', () => {
     // 支持移回根目录
     expect(useAppStore.getState().moveFolder(subA.id, null)).toBe(true);
     expect(useAppStore.getState().data.folders.find((f) => f.id === subA.id)?.parentId).toBe(null);
+  });
+
+  it('支持导入 Apifox JSON 集合（含多级目录与环境）', () => {
+    const apifoxDoc = {
+      apifoxProject: '1.0.0',
+      info: { name: 'PP 项目' },
+      environments: [{ name: '预发', baseUrl: 'https://pre.example.com', variables: [{ name: 'api_token', value: 'tok_123' }] }],
+      apiCollection: [
+        {
+          name: 'Root',
+          items: [
+            {
+              name: 'pre-pp',
+              items: [
+                {
+                  name: 'IAM 部门',
+                  api: {
+                    method: 'get',
+                    path: '/iam/dept',
+                    parameters: { query: [{ name: 'page', example: '1', enable: true }], header: [] },
+                  },
+                },
+                {
+                  name: 'IAM角色注册',
+                  api: {
+                    method: 'post',
+                    path: '/iam/role',
+                    requestBody: { type: 'application/json', example: '{"role":"admin"}' },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(isApifoxCollection(apifoxDoc)).toBe(true);
+    const init = seedData();
+    const res = importApifoxCollection(init, init.workspaces[0].id, apifoxDoc);
+    expect(res.folderCount).toBe(2); // PP 项目 + pre-pp
+    expect(res.requestCount).toBe(2);
+    expect(res.envCount).toBe(1);
+    const req = res.data.requests.find((r) => r.name === 'IAM角色注册');
+    expect(req?.method).toBe('POST');
+    expect(req?.url).toBe('{{base_url}}/iam/role');
+    expect(req?.body.type).toBe('json');
+    expect(req?.body.text).toBe('{"role":"admin"}');
   });
 });
