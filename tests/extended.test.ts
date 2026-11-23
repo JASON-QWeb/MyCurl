@@ -74,7 +74,9 @@ describe('请求构建、代码与文档导出', () => {
 
   it('导出 cURL 支持脱敏 / 模板 / 明文三种模式并保留 jq 管道', () => {
     const masked = exportAsCurl(data, req, { secretMode: 'mask', includeJq: true });
-    expect(masked).toContain('https://api.example-llm.dev/v1/chat/completions');
+    expect(masked).toMatch(/^curl 'https:\/\/api\.example-llm\.dev\/v1\/chat\/completions'/);
+    expect(masked).not.toContain('-sS');
+    expect(masked).not.toContain(' -L ');
     expect(masked).toContain('sk-dem••••9999');
     expect(masked).not.toContain('sk-demo0000111122223333444455556666777788889999');
     expect(masked).toContain(`| jq -r '.choices[0].message.content // .error.message // .'`);
@@ -86,6 +88,14 @@ describe('请求构建、代码与文档导出', () => {
 
     const real = exportAsCurl(data, req, { secretMode: 'resolve', includeJq: true });
     expect(real).toContain('sk-demo0000111122223333444455556666777788889999');
+
+    // 显式设置 followRedirects / verifySSL 时才输出 -L / -k
+    const withFlags = exportAsCurl(
+      data,
+      { ...req, settings: { ...req.settings, followRedirects: true, verifySSL: false } },
+      { secretMode: 'mask', includeJq: false },
+    );
+    expect(withFlags).toMatch(/^curl -k -L 'https:\/\/api\.example-llm\.dev\/v1\/chat\/completions'/);
   });
 
   it('导出 Fetch、Python 以及脱敏 Markdown 文档', () => {

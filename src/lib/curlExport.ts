@@ -34,9 +34,9 @@ export function exportAsCurl(data: AppData, req: HttpRequest, opts: CodeGenOptio
   const vars = buildVarMap(data, req, opts.secretMode);
   const prep = prepareRequest(data, req, vars);
   const lines: string[] = [];
-  const head = ['curl -sS'];
+  const head = ['curl'];
   if (prep.options.verifySSL === false) head.push('-k');
-  if (prep.options.followRedirects) head.push('-L');
+  if (req.settings?.followRedirects === true) head.push('-L');
   const hasBody = prep.body.kind !== 'none';
   if (!(prep.method === 'GET' && !hasBody) && !(prep.method === 'POST' && hasBody)) {
     head.push(`-X ${prep.method}`);

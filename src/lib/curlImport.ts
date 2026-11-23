@@ -516,6 +516,7 @@ export function planImport(
     auth,
     settings: {
       ...(parsed.insecure ? { verifySSL: false } : {}),
+      ...(parsed.followRedirects ? { followRedirects: true } : {}),
       ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
     },
     responseFilter: parsed.jqFilter && parsed.jqFilter !== '.' ? parsed.jqFilter : undefined,
