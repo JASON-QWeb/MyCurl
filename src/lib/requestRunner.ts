@@ -1,8 +1,8 @@
 /**
  * 请求构建与执行（通过本地 /api/send 流式代理）
  */
-import type { AppData, Auth, Folder, HttpRequest, KV, ResponseRecord } from './types';
-import { folderChain, renderTemplate, resolveVariables, type VarMap } from './template';
+import type { AppData, Auth, Folder, HttpRequest, KV, Language, ResponseRecord } from './types';
+import { findTemplateVars, folderChain, render, renderTemplate, resolveVariables, type VarMap } from './template';
 import { uid } from './util';
 import { tr } from './translate';
 import { responseTextDecoder } from './responseEncoding';
@@ -57,6 +57,42 @@ export function effectiveInheritedHeaders(headers: EffectiveHeader[], localHeade
   return Array.from(inherited.values());
 }
 
+export function resolveRequestHeaders(data: AppData, req: HttpRequest, renderKey: (key: string) => string) {
+  const local = req.headers.filter(h => h.enabled && h.key.trim())
+    .map(header => ({ key: renderKey(header.key.trim()), header }));
+  const localNames = new Set(local.map(({ key }) => key.toLowerCase()));
+  const inherited = resolveInheritedHeaders(data, req.folderId);
+  return { local, inherited, effective: effectiveInheritedHeaders(inherited, localNames, renderKey) };
+}
+
+export function collectRequestVarNames(data: AppData, req: HttpRequest, vars = resolveVariables(data, req.workspaceId, req.folderId)): string[] {
+  const names = new Set<string>();
+  const scan = (...fields: (string | undefined)[]) => {
+    for (const field of fields) {
+      for (const name of findTemplateVars(field ?? '')) {
+        if (!name.startsWith('$')) names.add(name);
+      }
+    }
+  };
+  const scanRow = (row: Pick<KV, 'key' | 'value'>) => scan(row.key, row.value);
+  scan(req.url);
+  req.params.filter(p => p.enabled).forEach(scanRow);
+  const { local, effective } = resolveRequestHeaders(data, req, key => render(key, vars));
+  for (const { header } of [...local, ...effective]) scanRow(header);
+  const { auth } = resolveEffectiveAuth(data, req);
+  if (auth.type === 'bearer') scan(auth.token, auth.prefix);
+  if (auth.type === 'basic') scan(auth.username, auth.password);
+  if (auth.type === 'apikey') scan(auth.key, auth.value);
+  const body = req.body;
+  if (['json', 'xml', 'text'].includes(body.type)) scan(body.text);
+  if (body.type === 'form') body.form.filter(row => row.enabled).forEach(scanRow);
+  if (body.type === 'multipart') body.multipart.filter(row => row.enabled && !row.isFile && row.key.trim()).forEach(scanRow);
+  if (body.type === 'graphql') scan(body.graphql?.query, body.graphql?.variables);
+  // Variable values can themselves reference a missing variable. Keep its quick-fix reachable.
+  for (const name of names) scan(vars.get(name)?.value);
+  return [...names];
+}
+
 export interface PreparedRequest {
   method: string;
   url: string;
@@ -70,6 +106,7 @@ export interface PreparedRequest {
       };
   bodyPreview?: string;
   missingVars: string[];
+  missingUrlVars: string[];
   options: {
     verifySSL: boolean;
     followRedirects: boolean;
@@ -89,26 +126,26 @@ function encodeBasic(user: string, pass: string): string {
 export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: VarMap): PreparedRequest {
   const vars = varsOverride ?? resolveVariables(data, req.workspaceId, req.folderId);
   const missing = new Set<string>();
-  const r = (s: string) => {
+  const missingUrl = new Set<string>();
+  const r = (s: string, inUrl = false) => {
     const res = renderTemplate(s ?? '', vars);
-    res.missing.forEach((m) => missing.add(m));
+    for (const name of res.missing) {
+      missing.add(name);
+      if (inUrl) missingUrl.add(name);
+    }
     return res.text;
   };
 
-  let url = r(req.url).trim();
+  let url = r(req.url, true).trim();
   if (url && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) {
     url = 'https://' + url;
   }
 
   // 请求头：文件夹继承 -> 请求自身（同名覆盖）
-  const localHeaders = req.headers
-    .filter((h) => h.enabled && h.key.trim())
-    .map((h): [string, string] => [r(h.key.trim()), r(h.value)]);
-  const localNames = new Set(localHeaders.map(([key]) => key.toLowerCase()));
-  const inherited = effectiveInheritedHeaders(resolveInheritedHeaders(data, req.folderId), localNames, r);
+  const { local, effective } = resolveRequestHeaders(data, req, r);
   const hdrList: [string, string][] = [
-    ...inherited.map(({ key, header }): [string, string] => [key, r(header.value)]),
-    ...localHeaders,
+    ...effective.map(({ key, header }): [string, string] => [key, r(header.value)]),
+    ...local.map(({ key, header }): [string, string] => [key, r(header.value)]),
   ];
   const hasHeader = (k: string) => hdrList.some(([hk]) => hk.toLowerCase() === k.toLowerCase());
 
@@ -127,8 +164,8 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
       hdrList.push(['Authorization', `Basic ${encodeBasic(u, p)}`]);
     }
   } else if (auth.type === 'apikey') {
-    const k = r(auth.key ?? '').trim();
-    const v = r(auth.value ?? '');
+    const k = r(auth.key ?? '', auth.in === 'query').trim();
+    const v = r(auth.value ?? '', !!k && auth.in === 'query');
     if (k) {
       if (auth.in === 'query') {
         const { base, query, hash } = splitUrl(url);
@@ -140,11 +177,29 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
     }
   }
 
-  // 请求体
+  const { body, bodyPreview } = prepareBody(req.body, r, data.settings.language);
+  const gs = data.settings;
+  const rs = req.settings ?? {};
+  return {
+    method: req.method.toUpperCase(),
+    url,
+    headers: hdrList,
+    body,
+    bodyPreview,
+    missingVars: [...missing],
+    missingUrlVars: [...missingUrl],
+    options: {
+      verifySSL: rs.verifySSL ?? gs.verifySSL,
+      followRedirects: rs.followRedirects ?? gs.followRedirects,
+      timeoutMs: rs.timeoutMs ?? gs.timeoutMs,
+      proxy: gs.proxy ?? '',
+    },
+  };
+}
+
+function prepareBody(rb: HttpRequest['body'], r: (input: string) => string, lang: Language) {
   let body: PreparedRequest['body'] = { kind: 'none' };
   let bodyPreview: string | undefined;
-  const method = req.method.toUpperCase();
-  const rb = req.body;
   if (rb.type === 'json') {
     const text = r(rb.text);
     body = { kind: 'text', text, contentType: 'application/json' };
@@ -187,25 +242,9 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
           : { name: r(f.key), value: r(f.value) },
       );
     body = { kind: 'multipart', fields };
-    bodyPreview = fields.map((f) => `${f.name}=${f.isFile ? `[文件:${f.fileName}]` : f.value}`).join('\n');
+    bodyPreview = fields.map(f => `${f.name}=${f.isFile ? tr(lang, `[文件:${f.fileName}]`, `[File:${f.fileName}]`) : f.value}`).join('\n');
   }
-
-  const gs = data.settings;
-  const rs = req.settings ?? {};
-  return {
-    method,
-    url,
-    headers: hdrList,
-    body,
-    bodyPreview,
-    missingVars: [...missing],
-    options: {
-      verifySSL: rs.verifySSL ?? gs.verifySSL,
-      followRedirects: rs.followRedirects ?? gs.followRedirects,
-      timeoutMs: rs.timeoutMs ?? gs.timeoutMs,
-      proxy: gs.proxy ?? '',
-    },
-  };
+  return { body, bodyPreview };
 }
 
 function isBinaryContentType(ct: string): boolean {
@@ -238,49 +277,36 @@ export interface ExecuteCallbacks {
   onUpdate: (partial: ResponseRecord) => void;
 }
 
-export async function executeRequest(
-  data: AppData,
-  req: HttpRequest,
-  signal: AbortSignal,
-  callbacks?: ExecuteCallbacks,
-): Promise<ResponseRecord> {
-  const prepared = prepareRequest(data, req);
-  const id = uid('res_');
-  const startedAt = Date.now();
-  const record: ResponseRecord = {
-    id,
-    requestId: req.id,
-    createdAt: startedAt,
-    method: prepared.method,
-    url: prepared.url,
-    status: 0,
-    statusText: '',
-    headers: [],
-    body: '',
-    contentType: '',
-    size: 0,
-    timeMs: 0,
-    requestHeaders: prepared.headers,
-    requestBodyPreview: prepared.bodyPreview,
-  };
+function markCancelled(record: ResponseRecord, lang: Language) {
+  record.cancelled = true;
+  record.error = tr(lang, '请求已取消', 'Request cancelled');
+  record.timeMs = Date.now() - record.createdAt;
+  return record;
+}
 
+function preflightError(prepared: PreparedRequest, lang: Language): string | undefined {
+  if (prepared.missingUrlVars.length) {
+    const names = prepared.missingUrlVars.map(name => `{{${name}}}`).join(tr(lang, '、', ', '));
+    return tr(lang, `请求地址包含未定义变量：${names}。请点击上方红色变量标签填写。`,
+      `Request URL contains undefined variable(s): ${names}. Click the red variable chip above to set a value.`);
+  }
   if (prepared.body.kind === 'multipart') {
     const missingFiles = prepared.body.fields.filter((field) => field.isFile && field.data == null);
     if (missingFiles.length) {
       const fields = missingFiles.map((field) => field.name).join(', ');
-      const error = tr(
-        data.settings.language,
+      return tr(
+        lang,
         `请先选择要上传的本地文件。缺少附件的表单字段：${fields}`,
         `Select a local file before sending. Multipart fields: ${fields}`,
       );
-      return { ...record, error };
     }
   }
 
-  if (!prepared.url) {
-    return { ...record, error: '请输入请求 URL' };
-  }
+  if (!prepared.url) return tr(lang, '请输入请求 URL', 'Enter a request URL');
+}
 
+function createEventHandler(record: ResponseRecord, lang: Language, callbacks?: ExecuteCallbacks) {
+  const startedAt = record.createdAt;
   let textDecoder = new TextDecoder();
   const binChunks: Uint8Array[] = [];
   let binSize = 0;
@@ -295,7 +321,7 @@ export async function executeRequest(
     callbacks.onUpdate({ ...record, timeMs: record.timeMs || Date.now() - startedAt });
   };
 
-  const handleEvent = (evt: any) => {
+  return (evt: any) => {
     if (evt.t === 'head') {
       record.status = evt.status;
       record.statusText = evt.statusText || '';
@@ -343,69 +369,34 @@ export async function executeRequest(
       }
       emit(true);
     } else if (evt.t === 'error') {
-      record.error = evt.message || '请求失败';
+      if (evt.code === 'ABORT_ERR' || evt.code === 'UND_ERR_ABORTED') markCancelled(record, lang);
+      else record.error = evt.message || tr(lang, '请求失败', 'Request failed');
       record.timeMs = evt.time ?? Date.now() - startedAt;
       emit(true);
     }
   };
+}
 
-  // Tauri 桌面端：直接走 Rust reqwest 流式引擎
-  if (isTauri()) {
-    const onAbort = () => {
-      tauriInvoke('cancel_request', { requestId: req.id }).catch(() => {});
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    try {
-      const channel = createTauriChannel<any>(handleEvent);
-      await tauriInvoke('send_request', {
-        payload: {
-          requestId: req.id,
-          method: prepared.method,
-          url: prepared.url,
-          headers: prepared.headers,
-          body: prepared.body,
-          options: prepared.options,
-        },
-        onEvent: channel,
-      });
-    } catch (err) {
-      if (!record.error) {
-        record.error = signal.aborted ? '请求已取消' : `Rust 引擎调用失败：${String(err)}`;
-        record.timeMs = Date.now() - startedAt;
-      }
-    } finally {
-      signal.removeEventListener('abort', onAbort);
-    }
-    return record;
-  }
+type SendPayload = Pick<PreparedRequest, 'method' | 'url' | 'headers' | 'body' | 'options'>;
 
-  // Web 开发模式：走本地 /api/send 代理
+async function sendViaProxy(payload: SendPayload, signal: AbortSignal, handleEvent: ReturnType<typeof createEventHandler>, lang: Language) {
   let res: Response;
   try {
     res = await fetch('/api/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: prepared.method,
-        url: prepared.url,
-        headers: prepared.headers,
-        body: prepared.body,
-        options: prepared.options,
-      }),
+      body: JSON.stringify(payload),
       signal,
     });
   } catch (err) {
-    const aborted = (err as Error)?.name === 'AbortError';
-    return {
-      ...record,
-      timeMs: Date.now() - startedAt,
-      error: aborted ? '请求已取消' : `无法连接到本地代理服务：${(err as Error).message}`,
-    };
+    if (signal.aborted || (err as Error)?.name === 'AbortError') throw err;
+    const message = (err as Error).message;
+    throw new Error(tr(lang, `无法连接到本地代理服务：${message}`, `Could not reach the local proxy: ${message}`));
   }
 
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => '');
-    return { ...record, timeMs: Date.now() - startedAt, error: errText || `代理请求失败（HTTP ${res.status}）` };
+    throw new Error(errText || tr(lang, `代理请求失败（HTTP ${res.status}）`, `Proxy request failed (HTTP ${res.status})`));
   }
 
   const reader = res.body.getReader();
@@ -429,11 +420,52 @@ export async function executeRequest(
         }
       }
     }
-  } catch (err) {
-    const aborted = (err as Error)?.name === 'AbortError' || signal.aborted;
-    record.error = aborted ? '请求已取消' : (err as Error).message;
-    record.timeMs = Date.now() - startedAt;
+  } finally {
+    reader.releaseLock();
   }
+}
 
-  return record;
+export async function executeRequest(
+  data: AppData,
+  req: HttpRequest,
+  signal: AbortSignal,
+  callbacks?: ExecuteCallbacks,
+): Promise<ResponseRecord> {
+  const prepared = prepareRequest(data, req);
+  const { method, url, headers, body, options } = prepared;
+  const lang = data.settings.language;
+  const record: ResponseRecord = {
+    id: uid('res_'), requestId: req.id, createdAt: Date.now(), method, url,
+    status: 0, statusText: '', headers: [], body: '', contentType: '', size: 0, timeMs: 0,
+    requestHeaders: headers, requestBodyPreview: prepared.bodyPreview,
+  };
+  if (signal.aborted) return markCancelled(record, lang);
+  const error = preflightError(prepared, lang);
+  if (error) return { ...record, error };
+
+  const payload = { method, url, headers, body, options };
+  const handleEvent = createEventHandler(record, lang, callbacks);
+  const native = isTauri();
+  try {
+    if (native) {
+      // Each send needs its own cancellation handle when a previous send is still finishing.
+      const requestId = record.id;
+      const onAbort = () => { void tauriInvoke('cancel_request', { requestId }).catch(() => {}); };
+      signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        await tauriInvoke('send_request', { payload: { ...payload, requestId }, onEvent: createTauriChannel(handleEvent) });
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+      }
+    } else {
+      await sendViaProxy(payload, signal, handleEvent, lang);
+    }
+  } catch (err) {
+    if (signal.aborted || (err as Error)?.name === 'AbortError') return markCancelled(record, lang);
+    record.error ||= native
+      ? tr(lang, `Rust 引擎调用失败：${String(err)}`, `Rust engine call failed: ${String(err)}`)
+      : (err as Error)?.message || String(err);
+    record.timeMs = Date.now() - record.createdAt;
+  }
+  return signal.aborted ? markCancelled(record, lang) : record;
 }

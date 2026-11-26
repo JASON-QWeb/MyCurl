@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, StateEffect, type Extension } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -149,6 +149,8 @@ function langExtension(lang: CodeLang): Extension {
   }
 }
 
+const varsChangedEffect = StateEffect.define<void>();
+
 function makeTemplateHighlighter(varsRef: React.MutableRefObject<VarMap | undefined>) {
   const build = (view: EditorView) => {
     const builder = new RangeSetBuilder<Decoration>();
@@ -180,7 +182,9 @@ function makeTemplateHighlighter(varsRef: React.MutableRefObject<VarMap | undefi
         this.decorations = build(view);
       }
       update(u: ViewUpdate) {
-        if (u.docChanged || u.viewportChanged) this.decorations = build(u.view);
+        if (u.docChanged || u.viewportChanged || u.transactions.some(tr => tr.effects.some(effect => effect.is(varsChangedEffect)))) {
+          this.decorations = build(u.view);
+        }
       }
     },
     { decorations: (v) => v.decorations },
@@ -206,7 +210,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const varsRef = useRef(vars);
   onChangeRef.current = onChange;
   onCtrlEnterRef.current = onCtrlEnter;
-  varsRef.current = vars;
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -285,6 +288,12 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       viewRef.current = null;
     };
   }, [language, readOnly, dark, fontSize, lineWrap, placeholder]);
+
+  useEffect(() => {
+    if (varsRef.current === vars) return;
+    varsRef.current = vars;
+    viewRef.current?.dispatch({ effects: varsChangedEffect.of() });
+  }, [vars]);
 
   // 同步外部 value 变化
   useEffect(() => {

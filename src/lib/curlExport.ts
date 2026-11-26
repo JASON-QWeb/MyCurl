@@ -1,12 +1,13 @@
 /**
  * 导出请求为 cURL / JavaScript fetch / Python requests，以及生成文件夹与工作区 Markdown API 文档
  */
-import type { AppData, Folder, HttpRequest, Language } from './types';
+import type { AppData, CurlCopySecretMode, Folder, HttpRequest, Language } from './types';
 import { prepareRequest, resolveEffectiveAuth, type PreparedRequest } from './requestRunner';
 import { tr } from './translate';
 import { parseLosslessJson, toPythonLiteral, type JsonValue } from './jsonLiteral';
-import { folderChain, resolveVariables, type VarMap } from './template';
-import { formatTime, maskSecret } from './util';
+import { folderChain, render, resolveVariables, type VarMap } from './template';
+import { formatTime, isCredentialKey, maskSecret } from './util';
+import { splitUrl } from './urlParams';
 
 export interface CodeGenOptions {
   /** resolve = 替换为真实值；mask = 密钥遮罩；template = 保留 {{变量}} 占位符 */
@@ -22,7 +23,7 @@ export function buildVarMap(data: AppData, req: HttpRequest, mode: CodeGenOption
     if (mode === 'template') {
       next.set(k, { ...v, value: `{{${k}}}` });
     } else {
-      next.set(k, { ...v, value: v.secret ? maskSecret(v.value) : v.value });
+      next.set(k, { ...v, value: v.secret ? (v.value.includes('{{') ? '••••' : maskSecret(v.value)) : v.value });
     }
   }
   return next;
@@ -32,9 +33,45 @@ function sq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+function maskUrlCredentials(url: string, authQueryKey?: string) {
+  const { base, query, hash } = splitUrl(url);
+  const safeBase = base.replace(/^(\w[\w+.-]*:\/\/[^/@]*?:)[^/@]+@/, '$1••••@');
+  if (query === null) return safeBase + hash;
+  const safeQuery = query.split('&').map(pair => {
+    const equals = pair.indexOf('=');
+    if (equals < 0 || equals === pair.length - 1) return pair;
+    let key = pair.slice(0, equals);
+    try { key = decodeURIComponent(key); } catch { /* Keep malformed escapes as written. */ }
+    return isCredentialKey(key, true) || key.toLowerCase() === authQueryKey ? pair.slice(0, equals + 1) + '••••' : pair;
+  }).join('&');
+  return safeBase + '?' + safeQuery + hash;
+}
+
+function prepareCurlCopy(data: AppData, req: HttpRequest, mode: CodeGenOptions['secretMode']) {
+  const vars = buildVarMap(data, req, mode);
+  if (mode !== 'mask') return prepareRequest(data, req, vars);
+  const { auth } = resolveEffectiveAuth(data, req);
+  // Resolve the API-key name once, including when an explicit header overrides it.
+  const apiKey = auth.type === 'apikey' ? render(auth.key ?? '', vars).trim() : undefined;
+  const prep = prepareRequest(data, apiKey === undefined ? req : { ...req, auth: { ...auth, key: apiKey } }, vars);
+  const keyName = apiKey?.toLowerCase();
+  prep.url = maskUrlCredentials(prep.url, auth.in === 'query' ? keyName : undefined);
+  const masked = new Set([...vars.values()].filter(v => v.secret).map(v => v.value));
+  prep.headers = prep.headers.map(([key, value]) => {
+    const sensitive = isCredentialKey(key) || (auth.in !== 'query' && key.toLowerCase() === keyName);
+    if (!value || !sensitive) return [key, value];
+    const prefix = /^(?:Bearer|Basic)\s+/i.exec(value)?.[0] ?? '';
+    return [key, masked.has(value.slice(prefix.length)) ? value : prefix + '••••'];
+  });
+  return prep;
+}
+
+export function exportResolvedUrl(data: AppData, req: HttpRequest, mode: CurlCopySecretMode): string {
+  return prepareCurlCopy(data, req, mode).url;
+}
+
 export function exportAsCurl(data: AppData, req: HttpRequest, opts: CodeGenOptions = { secretMode: 'mask', includeJq: true }): string {
-  const vars = buildVarMap(data, req, opts.secretMode);
-  const prep = prepareRequest(data, req, vars);
+  const prep = prepareCurlCopy(data, req, opts.secretMode);
   const lines: string[] = [];
   const head = ['curl'];
   if (prep.options.verifySSL === false) head.push('-k');

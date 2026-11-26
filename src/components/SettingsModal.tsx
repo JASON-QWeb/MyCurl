@@ -277,6 +277,16 @@ export const SettingsModal: React.FC = () => {
                 style={{ accentColor: 'var(--accent)' }}
               />
             </div>
+            <label className="switch-row">
+              {t('直接粘贴 cURL 时跳过预览弹窗', 'Skip preview modal on direct paste')}
+              <input type="checkbox" checked={s.import.skipPreview}
+                onChange={e => updateImportSettings({ skipPreview: e.target.checked })} style={{ accentColor: 'var(--accent)' }} />
+            </label>
+            <label className="switch-row">
+              {t('归档后自动发送请求', 'Auto-send request after import')}
+              <input type="checkbox" checked={s.import.autoSend}
+                onChange={e => updateImportSettings({ autoSend: e.target.checked })} style={{ accentColor: 'var(--accent)' }} />
+            </label>
             <div className="switch-row">
               <div>
                 <div>{t('复制 cURL 时的密钥处理', 'Secrets When Copying cURL')}</div>

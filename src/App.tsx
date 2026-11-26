@@ -117,7 +117,7 @@ export const App: React.FC = () => {
       const text = e.clipboardData?.getData('text') ?? '';
       if (looksLikeCurl(text)) {
         e.preventDefault();
-        openImportModal(text);
+        state.importPastedCurl(text);
       }
     };
 

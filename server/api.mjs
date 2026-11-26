@@ -277,7 +277,8 @@ async function handleSend(req, res) {
     write({ t: 'end', time: performance.now() - start, size, wireSize });
   } catch (err) {
     finished = true;
-    write({ t: 'error', message: friendlyError(err, timedOut), code: err?.code || err?.cause?.code || '', time: performance.now() - start });
+    const code = timedOut ? 'ETIMEDOUT' : err?.code || err?.cause?.code || (err?.name === 'AbortError' ? 'ABORT_ERR' : '');
+    write({ t: 'error', message: friendlyError(err, timedOut), code, time: performance.now() - start });
   } finally {
     if (timer) clearTimeout(timer);
     res.end();

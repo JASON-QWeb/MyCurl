@@ -1,11 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Auth, BodyType, HttpRequest } from '../lib/types';
-import { findTemplateVars, folderChain, render, resolveVariables } from '../lib/template';
-import { effectiveInheritedHeaders, resolveEffectiveAuth, resolveInheritedHeaders } from '../lib/requestRunner';
+import { folderChain, render, resolveVariables } from '../lib/template';
+import { collectRequestVarNames, resolveEffectiveAuth, resolveRequestHeaders } from '../lib/requestRunner';
 import { syncParamsFromUrl, syncUrlFromParams } from '../lib/urlParams';
-import { copyText, kv, maskSecret, methodColor, uid } from '../lib/util';
-import { exportAsCurl } from '../lib/curlExport';
+import { kv, maskSecret, methodColor, uid } from '../lib/util';
 import { prettyJson } from '../lib/curlParser';
 import { useI18n } from '../lib/i18n';
 import { TemplateInput } from './TemplateInput';
@@ -13,9 +12,8 @@ import { CodeEditor } from './CodeEditor';
 import { KeyValueTable } from './KeyValueTable';
 import { MultipartTable } from './MultipartTable';
 import { MarkdownView } from './MarkdownView';
+import { RequestHeaderActions } from './RequestHeaderActions';
 import {
-  IconCode,
-  IconCopy,
   IconDoc,
   IconFolder,
   IconKey,
@@ -50,8 +48,8 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
     sendRequest,
     cancelRequest,
     selectFolder,
-    openImportModal,
-    setExportModal,
+    importPastedCurl,
+    defineRequestVariable,
     setEnvModal,
     toast,
   } = useAppStore();
@@ -73,19 +71,17 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const [editingDoc, setEditingDoc] = useState(false);
 
   const sending = !!inFlight[req.id];
-  const vars = useMemo(() => resolveVariables(data, req.workspaceId, req.folderId), [data, req.workspaceId, req.folderId]);
+  const vars = useMemo(() => resolveVariables(data, req.workspaceId, req.folderId),
+    [data.environments, data.folders, data.settings.activeEnvironment, lang, req.workspaceId, req.folderId]);
   const chain = useMemo(() => folderChain(data, req.folderId), [data, req.folderId]);
   const parentFolder = chain[chain.length - 1] ?? null;
   const effectiveAuth = useMemo(() => resolveEffectiveAuth(data, req), [data, req]);
   const { inheritedHeaders, enabledHeadersCount } = useMemo(() => {
-    const localHeaders = req.headers.filter(h => h.enabled && h.key.trim());
-    const renderKey = (key: string) => render(key, vars);
-    const localHeaderNames = new Set(localHeaders.map(h => renderKey(h.key.trim()).toLowerCase()));
-    const inherited = resolveInheritedHeaders(data, req.folderId);
-    const effective = new Set(effectiveInheritedHeaders(inherited, localHeaderNames, renderKey).map(item => item.header));
+    const { local, inherited, effective } = resolveRequestHeaders(data, req, key => render(key, vars));
+    const activeHeaders = new Set(effective.map(item => item.header));
     return {
-      inheritedHeaders: inherited.map(h => ({ ...h, overridden: !effective.has(h) })),
-      enabledHeadersCount: localHeaders.length + effective.size,
+      inheritedHeaders: inherited.map(h => ({ ...h, overridden: !activeHeaders.has(h) })),
+      enabledHeadersCount: local.length + effective.length,
     };
   }, [data, req.headers, req.folderId, vars]);
 
@@ -105,17 +101,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   }, [parentFolder, selectFolder, setEnvModal, lang]);
 
   // 收集当前请求引用的所有模板变量，方便一眼查看解析结果与来源
-  const usedVarNames = useMemo(() => {
-    const names = new Set<string>();
-    const scan = (s?: string) => findTemplateVars(s ?? '').forEach((n) => names.add(n));
-    scan(req.url);
-    req.headers.filter((h) => h.enabled).forEach((h) => scan(h.value));
-    scan(req.auth.token);
-    scan(req.auth.password);
-    scan(req.auth.value);
-    if (req.body.type === 'json' || req.body.type === 'text' || req.body.type === 'xml') scan(req.body.text);
-    return [...names].filter((n) => !n.startsWith('$'));
-  }, [req]);
+  const usedVarNames = useMemo(() => collectRequestVarNames(data, req, vars), [data, req, vars]);
 
   const handleUrlChange = (nextUrl: string) => {
     const nextParams = syncParamsFromUrl(nextUrl, req.params);
@@ -191,12 +177,6 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const enabledParamsCount = req.params.filter((p) => p.enabled && (p.key || p.value)).length;
   const hasAuth = effectiveAuth.auth.type !== 'none';
 
-  const curlSecretMode = data.settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
-  const copyCurlTitle =
-    curlSecretMode === 'resolve'
-      ? t('复制为 cURL 命令（含明文密钥）', 'Copy as cURL (raw secrets)')
-      : t('复制为 cURL 命令（密钥脱敏）', 'Copy as cURL (secrets masked)');
-
   return (
     <section className="pane">
       {/* 顶部标题与面包屑 */}
@@ -222,32 +202,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
             onChange={(e) => updateRequest(req.id, { name: e.target.value })}
           />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            title={copyCurlTitle}
-            onClick={() => {
-              copyText(exportAsCurl(data, req, { secretMode: curlSecretMode, includeJq: true }));
-              toast(
-                curlSecretMode === 'resolve'
-                  ? t('已复制 cURL 命令（含明文密钥）', 'Copied cURL (raw secrets included)')
-                  : t('已复制 cURL 命令（密钥已脱敏）', 'Copied cURL (secrets masked)'),
-                'success',
-              );
-            }}
-          >
-            <IconCopy size={13} />
-            cURL
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            title={t('生成代码（cURL / fetch / Python / Markdown）', 'Generate code (cURL / fetch / Python / Markdown)')}
-            onClick={() => setExportModal(req.id)}
-          >
-            <IconCode size={13} />
-            {t('代码', 'Code')}
-          </button>
-        </div>
+        <RequestHeaderActions req={req} />
       </div>
 
       {/* URL 地址栏 */}
@@ -271,7 +226,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
             vars={vars}
             placeholder={t('输入请求地址，或直接粘贴 cURL 命令…', 'Enter request URL or paste a cURL command…')}
             onEnter={() => sendRequest(req.id)}
-            onPasteCurl={(text) => openImportModal(text)}
+            onPasteCurl={importPastedCurl}
           />
         </div>
         {sending ? (
@@ -298,8 +253,8 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                 <button
                   key={name}
                   className="var-chip missing"
-                  onClick={() => (parentFolder ? selectFolder(parentFolder.id, 'vars') : setEnvModal(true))}
-                  title={t('变量未定义，点击去添加', 'Undefined variable — click to add')}
+                  onClick={() => void defineRequestVariable(req.id, name)}
+                  title={t('点击填写变量值', 'Click to set a value')}
                 >
                   {`{{${name}}}`} · {t('未定义', 'undefined')}
                 </button>

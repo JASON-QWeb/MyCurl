@@ -52,6 +52,13 @@ export function maskSecret(value: string): string {
   return `${value.slice(0, head)}••••${value.slice(-tail)}`;
 }
 
+const credentialKey = /^(?:(?:x[-_])?(?:api[-_]?(?:key|token)|(?:access|refresh|auth|private|id)[-_]?token|client[-_]secret|secret(?:[-_]key)?|token|password|passwd)|x-goog-api-key|x-auth-key|(?:ocp-apim-|x-)?subscription-key|authorization|proxy-authorization|cookie|set-cookie)$/i;
+const queryKey = /^(?:key|auth|signature|sig)$/i;
+
+export function isCredentialKey(name: string, query = false) {
+  return credentialKey.test(name) || (query && queryKey.test(name));
+}
+
 export function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));

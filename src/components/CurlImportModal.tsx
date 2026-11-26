@@ -108,6 +108,8 @@ export const CurlImportModal: React.FC = () => {
     }
     closeImportModal();
   };
+  const autoSend = data.settings.import.autoSend;
+  const shortcut = <span className="kbd" style={{ color: '#fff', background: 'rgba(255,255,255,0.18)', borderColor: 'transparent' }}>⌘↵</span>;
 
   return (
     <div
@@ -121,7 +123,8 @@ export const CurlImportModal: React.FC = () => {
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault();
-            commit(false);
+            e.stopPropagation();
+            commit(autoSend);
           } else if (e.key === 'Escape') {
             closeImportModal();
           }
@@ -542,18 +545,17 @@ export const CurlImportModal: React.FC = () => {
             <button className="btn" onClick={closeImportModal}>
               {t('取消', 'Cancel')}
             </button>
-            <button className="btn" disabled={parsedList.length === 0} onClick={() => commit(true)}>
+            <button className={autoSend ? 'btn btn-primary' : 'btn'} disabled={parsedList.length === 0} onClick={() => commit(true)}>
               <IconSend size={13} />
-              {t('归档并立即发送', 'Import & Send')}
+              {parsedList.length > 1 ? t('全部归档并发送最后一条', 'Import All & Send Last') : t('归档并立即发送', 'Import & Send')}
+              {autoSend && shortcut}
             </button>
-            <button className="btn btn-primary" disabled={parsedList.length === 0} onClick={() => commit(false)}>
+            <button className={autoSend ? 'btn' : 'btn btn-primary'} disabled={parsedList.length === 0} onClick={() => commit(false)}>
               <IconCheck size={14} />
               {parsedList.length > 1
                 ? t(`全部归档 (${parsedList.length})`, `Import All (${parsedList.length})`)
                 : t('归档并打开', 'Import & Open')}
-              <span className="kbd" style={{ color: '#fff', background: 'rgba(255,255,255,0.18)', borderColor: 'transparent' }}>
-                ⌘↵
-              </span>
+              {!autoSend && shortcut}
             </button>
           </div>
         </div>

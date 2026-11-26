@@ -31,6 +31,7 @@ export const TopBar: React.FC = () => {
     deleteWorkspace,
     setActiveEnvironment,
     openImportModal,
+    importPastedCurl,
     setEnvModal,
     setSettingsModal,
     setCommandPalette,
@@ -277,10 +278,12 @@ export const TopBar: React.FC = () => {
                 padding: 0,
               }}
               onClick={() => {
-                openImportModal(clipboardCurl);
+                importPastedCurl(clipboardCurl);
                 dismissClipboardCurl();
               }}
-              title={t('点击预览并自动归档剪贴板中的 cURL', 'Click to preview and import cURL from clipboard')}
+              title={data.settings.import.skipPreview && data.settings.import.autoSend
+                ? t('归档剪贴板中的 cURL 并发送选中的请求', 'Import clipboard cURL and send the selected request')
+                : t('归档剪贴板中的 cURL', 'Import cURL from clipboard')}
             >
               <IconClipboard size={13} />
               <span>{t('检测到 cURL，点击一键归档', 'cURL detected — Import')}</span>

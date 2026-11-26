@@ -3,9 +3,10 @@ import type { AppData, Environment, Folder, HttpRequest, ResponseRecord, Setting
 import { newEnvironment, newFolder, newRequest, newWorkspace, normalizeData, seedData } from '../lib/factory';
 import { deleteHistoryItem, fetchServerInfo, loadAppData, loadHistory, saveAppData, saveHistoryItem, type ServerInfo } from '../lib/storage';
 import { executeRequest } from '../lib/requestRunner';
-import { applyImport, importAll, type ImportOptions, type ImportPlan } from '../lib/curlImport';
-import type { ParsedCurl } from '../lib/curlParser';
-import { uid } from '../lib/util';
+import { applyImport, importAll, planImport, type ImportOptions, type ImportPlan } from '../lib/curlImport';
+import { parseCurlCommands, type ParsedCurl } from '../lib/curlParser';
+import { SECRET_NAME_RE } from '../lib/template';
+import { kv, uid } from '../lib/util';
 import { tr } from '../lib/translate';
 import { readPostmanEnvironment } from '../lib/postmanEnvironment';
 
@@ -99,6 +100,7 @@ interface AppStore {
   // 请求
   createRequest: (folderId: string | null, partial?: Partial<HttpRequest>) => HttpRequest;
   updateRequest: (id: string, patch: Partial<HttpRequest>) => void;
+  defineRequestVariable: (requestId: string, name: string) => Promise<void>;
   duplicateRequest: (id: string) => HttpRequest | null;
   moveRequest: (id: string, folderId: string | null) => void;
   deleteRequest: (id: string) => void;
@@ -108,6 +110,7 @@ interface AppStore {
   updateImportSettings: (patch: Partial<Settings['import']>) => void;
 
   // 导入 cURL
+  importPastedCurl: (text: string) => void;
   applySingleImport: (plan: ImportPlan, autoSend?: boolean) => { requestId: string; folderId: string | null; created: boolean };
   applyBatchImport: (parsed: ParsedCurl[], opts?: Partial<ImportOptions>, autoSend?: boolean) => { count: number; lastRequestId: string | null };
 
@@ -496,6 +499,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
 
+  defineRequestVariable: async (requestId, name) => {
+    const { data, prompt } = get();
+    const req = data.requests.find(r => r.id === requestId);
+    if (!req) return;
+    const folder = data.folders.find(f => f.id === req.folderId);
+    const scope = folder ?? data.environments.find(env => env.workspaceId === req.workspaceId && env.isBase);
+    if (!scope) return;
+    const lang = data.settings.language;
+    const label = `{{${name}}}`;
+    const target = folder ? tr(lang, `文件夹「${folder.name}」`, `folder "${folder.name}"`) : tr(lang, '全局变量', 'Global Variables');
+    const value = await prompt({
+      title: tr(lang, `设置 ${label} 的值`, `Set a value for ${label}`),
+      message: tr(lang, `变量将保存到${target}。`, `This variable will be saved to ${target}.`),
+      confirmLabel: tr(lang, '保存', 'Save'),
+    });
+    if (!value?.trim()) return;
+    const holders = folder ? get().data.folders : get().data.environments;
+    const current = holders.find(holder => holder.id === scope.id);
+    if (!current) return;
+    const existing = current.variables.find(v => v.key.trim() === name);
+    const updated = { ...(existing ?? kv(name)), key: name, value, enabled: true, secret: !!existing?.secret || SECRET_NAME_RE.test(name) };
+    const variables = existing
+      ? current.variables.map(v => v === existing ? updated : v)
+      : [...current.variables, updated];
+    if (folder) get().updateFolder(scope.id, { variables });
+    else get().updateEnvironment(scope.id, { variables });
+    get().toast(tr(lang, `已将 ${label} 保存到${target}`, `Saved ${label} to ${target}`), 'success');
+  },
+
   duplicateRequest: (id) => {
     const src = get().data.requests.find((r) => r.id === id);
     if (!src) return null;
@@ -541,6 +573,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ...d,
       settings: { ...d.settings, import: { ...d.settings.import, ...patch } },
     }));
+  },
+
+  importPastedCurl: (text) => {
+    const { data, openImportModal, applySingleImport, applyBatchImport } = get();
+    const options = data.settings.import;
+    if (options.skipPreview) {
+      const parsed = parseCurlCommands(text, data.settings.language);
+      if (parsed.length === 1) {
+        applySingleImport(planImport(parsed[0], data, activeWsId(data), options), options.autoSend);
+        return;
+      }
+      if (parsed.length > 1) {
+        applyBatchImport(parsed, undefined, options.autoSend);
+        return;
+      }
+    }
+    openImportModal(text);
   },
 
   applySingleImport: (plan, autoSend = false) => {
@@ -639,9 +688,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     });
 
+    if (get().inFlight[requestId]?.controller !== controller) return;
     set((s) => {
       const nextInFlight = { ...s.inFlight };
-      if (nextInFlight[requestId]?.controller === controller) delete nextInFlight[requestId];
+      delete nextInFlight[requestId];
       const prevHist = s.histories[requestId] ?? [];
       const nextHist = [result, ...prevHist.filter((x) => x.id !== result.id)].slice(0, 30);
       return {
@@ -651,7 +701,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       };
     });
 
-    if (result.error !== '请求已取消') {
+    if (!result.cancelled) {
       saveHistoryItem(requestId, result);
     }
   },

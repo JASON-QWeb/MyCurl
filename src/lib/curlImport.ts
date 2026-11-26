@@ -10,7 +10,7 @@
 import type { ParsedCurl } from './curlParser';
 import type { AppData, Auth, Folder, HttpRequest, KV, Variable } from './types';
 import { emptyBody, newFolder, newRequest } from './factory';
-import { folderChain } from './template';
+import { folderChain, SECRET_NAME_RE } from './template';
 import { formatTime, maskSecret, uid } from './util';
 import { parseQuery, splitUrl } from './urlParams';
 
@@ -60,7 +60,6 @@ export interface ImportPlan {
 const SECRET_HEADER_RE =
   /^(x-)?(api[-_]?key|apikey|api[-_]?token|access[-_]?token|auth[-_]?token|token|secret|secret[-_]?key|client[-_]?secret|goog-api-key|subscription-key)$|^ocp-apim-subscription-key$|^x-goog-api-key$|^x-auth-key$|^private-token$/i;
 const SECRET_QUERY_RE = /^(key|api[-_]?key|apikey|access[-_]?token|token|secret|client[-_]?secret|auth|sig|signature|private[-_]?token)$/i;
-const SECRET_NAME_RE = /key|token|secret|password|passwd|auth|credential/i;
 
 const KNOWN_HOSTS: [RegExp, string][] = [
   [/(^|\.)openai\.com$/, 'OpenAI'],

@@ -531,13 +531,13 @@ button {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
+  border-radius: 6px;
+  background: var(--bg-elev);
   border: 1px solid var(--accent);
   color: var(--text);
   font-size: 12px;
   font-weight: 500;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
   white-space: nowrap;
   max-width: 280px;
   overflow: hidden;

@@ -2,6 +2,7 @@
  * 模板变量：{{ name }}，以及内置动态变量 {{$uuid}} {{$timestamp}} 等
  */
 import type { AppData, Folder, Variable } from './types';
+import { tr } from './translate';
 
 export interface ResolvedVar {
   key: string;
@@ -16,6 +17,7 @@ export interface ResolvedVar {
 export type VarMap = Map<string, ResolvedVar>;
 
 export const TEMPLATE_RE = /\{\{\s*([$A-Za-z0-9_.\-\u4e00-\u9fa5]+)\s*\}\}/g;
+export const SECRET_NAME_RE = /key|token|secret|password|passwd|auth|credential/i;
 
 export const DYNAMIC_VARS: { key: string; desc: string; gen: () => string }[] = [
   { key: '$uuid', desc: '随机 UUID', gen: () => uuidv4() },
@@ -59,12 +61,13 @@ export function resolveVariables(data: AppData, workspaceId: string, folderId: s
     }
   };
   const envs = data.environments.filter((e) => e.workspaceId === workspaceId);
+  const lang = data.settings.language;
   const base = envs.find((e) => e.isBase);
-  if (base) add(base.variables, '全局变量', 'base', base.id);
+  if (base) add(base.variables, tr(lang, '全局变量', 'Global Variables'), 'base', base.id);
   const activeId = data.settings.activeEnvironment[workspaceId];
   const active = envs.find((e) => e.id === activeId && !e.isBase);
-  if (active) add(active.variables, `环境：${active.name}`, 'env', active.id);
-  for (const f of folderChain(data, folderId)) add(f.variables, `文件夹：${f.name}`, 'folder', f.id);
+  if (active) add(active.variables, tr(lang, `环境：${active.name}`, `Environment: ${active.name}`), 'env', active.id);
+  for (const f of folderChain(data, folderId)) add(f.variables, tr(lang, `文件夹：${f.name}`, `Folder: ${f.name}`), 'folder', f.id);
   return map;
 }
 

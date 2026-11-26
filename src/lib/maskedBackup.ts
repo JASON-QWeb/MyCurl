@@ -1,9 +1,7 @@
 import type { AppData, Auth, HttpRequest, KV } from './types';
 import { parseQuery, splitUrl } from './urlParams';
-import { maskSecret } from './util';
+import { isCredentialKey, maskSecret } from './util';
 
-const credentialKey = /^(?:(?:x[-_])?(?:api[-_]?(?:key|token)|(?:access|refresh|auth|private|id)[-_]?token|client[-_]secret|secret(?:[-_]key)?|token|password|passwd)|x-goog-api-key|x-auth-key|(?:ocp-apim-|x-)?subscription-key|authorization|proxy-authorization|cookie|set-cookie)$/i;
-const queryKey = /^(?:key|auth|signature|sig)$/i;
 const template = /^\{\{\s*[$\w.\-\u4e00-\u9fa5]+\s*\}\}$/;
 type Remember = (value: string | undefined) => void;
 
@@ -14,7 +12,7 @@ function decode(value: string): string {
 function inspectFields(fields: Pick<KV, 'key' | 'value'>[], remember: Remember, query = false) {
   for (const { key, value } of fields) {
     const name = decode(key).trim();
-    if (!credentialKey.test(name) && !(query && queryKey.test(name))) continue;
+    if (!isCredentialKey(name, query)) continue;
     if (/^(?:proxy-)?authorization$/i.test(name)) {
       const credential = /^(?:Bearer|Basic)\s+(.+)$/i.exec(value.trim());
       remember(credential ? credential[1] : value);
@@ -55,7 +53,7 @@ function inspectJson(text: string | undefined, remember: Remember) {
     // A reviver would only see the last value of a repeated credential key.
     const strings = /("(?:\\.|[^"\\])*")(?:\s*:\s*("(?:\\.|[^"\\])*"))?/g;
     for (const [, key, value] of text.matchAll(strings)) {
-      if (value && credentialKey.test(JSON.parse(key))) remember(JSON.parse(value));
+      if (value && isCredentialKey(JSON.parse(key))) remember(JSON.parse(value));
     }
   } catch { /* Other body formats still receive literal substitutions. */ }
 }

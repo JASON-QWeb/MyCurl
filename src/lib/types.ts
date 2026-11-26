@@ -184,6 +184,7 @@ export interface ResponseRecord {
   size: number;
   timeMs: number;
   ttfbMs?: number;
+  cancelled?: boolean;
   error?: string;
   requestHeaders?: [string, string][];
   requestBodyPreview?: string;
