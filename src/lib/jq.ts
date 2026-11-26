@@ -9,6 +9,13 @@
  * 也支持简单 JSONPath：$.a.b[0]、$.items[*].name
  */
 
+import { tr } from './translate';
+import type { Language } from './types';
+
+class FilterError extends Error {
+  constructor(zh: string, readonly en: string) { super(zh); }
+}
+
 type Node =
   | { k: 'identity' }
   | { k: 'recurse' }
@@ -360,7 +367,7 @@ function compareGroupKeys(a: unknown, b: unknown): number {
 }
 
 function groupBy(input: unknown, keyFilter: Node): unknown[][] {
-  if (!Array.isArray(input)) throw new Error('group_by 需要数组');
+  if (!Array.isArray(input)) throw new FilterError('group_by 需要数组', 'group_by requires an array');
   const rows = input.map(value => ({ value, key: evalNode(keyFilter, value) }));
   rows.sort((a, b) => compareGroupKeys(a.key, b.key));
   const groups: unknown[][] = [];
@@ -645,7 +652,7 @@ function callFn(name: string, args: Node[], input: unknown): unknown[] {
     case 'sort_by':
       return [[...(input as unknown[])].sort((a, b) => cmp(arg(0, a)[0], arg(0, b)[0]))];
     case 'group_by':
-      if (args.length !== 1) throw new Error('group_by 需要一个筛选表达式');
+      if (args.length !== 1) throw new FilterError('group_by 需要一个筛选表达式', 'group_by requires one filter expression');
       return [groupBy(input, args[0])];
     case 'reverse':
       return [typeof input === 'string' ? [...input].reverse().join('') : [...(input as unknown[])].reverse()];
@@ -736,11 +743,11 @@ export function formatFilterOutput(values: unknown[]): string {
     .join('\n');
 }
 
-export function applyFilterToText(expr: string, text: string): { ok: true; output: string } | { ok: false; error: string } {
+export function applyFilterToText(expr: string, text: string, lang?: Language): { ok: true; output: string } | { ok: false; error: string } {
   try {
     const data = JSON.parse(text);
     return { ok: true, output: formatFilterOutput(runFilter(expr, data)) };
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    return { ok: false, error: e instanceof FilterError ? tr(lang, e.message, e.en) : (e as Error).message };
   }
 }

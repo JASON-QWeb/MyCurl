@@ -3,6 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import type { Folder, HttpRequest } from '../lib/types';
 import { copyText, methodColor, methodShort } from '../lib/util';
 import { exportAsCurl } from '../lib/curlExport';
+import { filterSidebarTree, parseRequestSearch } from '../lib/requestSearch';
 import { useI18n } from '../lib/i18n';
 import {
   IconChevronDown,
@@ -101,22 +102,11 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     [data.requests, wsId],
   );
 
-  const q = sidebarFilter.trim().toLowerCase();
-
-  const matchesReq = (r: HttpRequest) =>
-    !q ||
-    r.name.toLowerCase().includes(q) ||
-    r.url.toLowerCase().includes(q) ||
-    r.method.toLowerCase().includes(q);
-
-  const folderHasMatch = (fid: string): boolean => {
-    const f = folders.find((x) => x.id === fid);
-    if (!f) return false;
-    if (!q) return true;
-    if (f.name.toLowerCase().includes(q) || (f.host && f.host.toLowerCase().includes(q))) return true;
-    if (requests.some((r) => r.folderId === fid && matchesReq(r))) return true;
-    return folders.some((c) => c.parentId === fid && folderHasMatch(c.id));
-  };
+  const matches = useMemo(() => sidebarFilter.trim()
+    ? filterSidebarTree(data, wsId, parseRequestSearch(sidebarFilter))
+    : null, [data, wsId, sidebarFilter]);
+  const visibleFolders = matches ? folders.filter(f => matches.folderIds.has(f.id)) : folders;
+  const visibleRequests = matches ? requests.filter(r => matches.requestIds.has(r.id)) : requests;
 
   const handleDeleteFolder = async (f: Folder) => {
     const ok = await confirm({
@@ -313,11 +303,10 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
   };
 
   const renderFolder = (f: Folder, depth: number) => {
-    if (!folderHasMatch(f.id)) return null;
-    const expanded = q ? true : !!expandedFolders[f.id];
+    const expanded = !!matches || !!expandedFolders[f.id];
     const active = selection?.kind === 'folder' && selection.id === f.id;
-    const childFolders = folders.filter((c) => c.parentId === f.id);
-    const childReqs = requests.filter((r) => r.folderId === f.id && (q ? matchesReq(r) || f.name.toLowerCase().includes(q) : true));
+    const childFolders = visibleFolders.filter((c) => c.parentId === f.id);
+    const childReqs = visibleRequests.filter((r) => r.folderId === f.id);
     const secretCount = f.variables.filter((v) => v.secret && v.enabled).length;
     const isRenaming = renaming?.kind === 'folder' && renaming.id === f.id;
     const isDragging = dragState?.kind === 'folder' && dragState.id === f.id;
@@ -333,7 +322,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
             if (!isRenaming) startPointerDrag(e, { kind: 'folder', id: f.id, label: f.name });
           }}
           onClick={() => {
-            if (suppressClickRef.current) return;
+            if (suppressClickRef.current || matches) return;
             toggleFolder(f.id);
           }}
           onContextMenu={(e) => {
@@ -408,8 +397,8 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     );
   };
 
-  const topFolders = folders.filter((f) => !f.parentId);
-  const rootReqs = requests.filter((r) => !r.folderId && matchesReq(r));
+  const topFolders = visibleFolders.filter((f) => !f.parentId);
+  const rootReqs = visibleRequests.filter((r) => !r.folderId);
 
   const ctxReq = ctx?.kind === 'request' ? requests.find((r) => r.id === ctx.id) : null;
   const ctxFolder = ctx?.kind === 'folder' ? folders.find((f) => f.id === ctx.id) : null;
@@ -421,6 +410,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
           <IconSearch size={13} />
           <input
             placeholder={t('筛选接口、域名、路径…', 'Filter requests, hosts, paths…')}
+            title={t('可组合筛选，例如 method:POST folder:name', 'Combine filters, e.g. method:POST folder:name')}
             value={sidebarFilter}
             onChange={(e) => setSidebarFilter(e.target.value)}
           />
@@ -458,7 +448,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         {rootReqs.map((r) => renderRequestRow(r, 0))}
         {topFolders.length === 0 && rootReqs.length === 0 && (
           <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            {t(
+            {matches ? t('未找到匹配项', 'No matching results') : t(
               '还没有接口，点击上方「cURL」直接粘贴 AI 给的指令即可自动归档。',
               'No requests yet. Click "cURL" above to paste and auto-organize a cURL command.',
             )}

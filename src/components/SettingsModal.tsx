@@ -9,7 +9,6 @@ import {
   isMyCurlBackup,
   isPostmanCollection,
 } from '../lib/collectionIO';
-import { readPostmanEnvironment } from '../lib/postmanEnvironment';
 import { parseCurlCommands } from '../lib/curlParser';
 import { useI18n, type Language } from '../lib/i18n';
 import type { CurlCopySecretMode } from '../lib/types';
@@ -24,7 +23,7 @@ export const SettingsModal: React.FC = () => {
     updateSettings,
     updateImportSettings,
     replaceData,
-    mutate,
+    importPostmanEnvironment,
     applyBatchImport,
     confirm,
     toast,
@@ -73,14 +72,7 @@ export const SettingsModal: React.FC = () => {
         return;
       }
       if (json?._postman_variable_scope === 'environment') {
-        const env = readPostmanEnvironment(json, wsId);
-        if (!env) {
-          toast(t('Postman 环境文件格式无效，请检查环境名称与变量列表', 'Invalid Postman environment name or variable list'), 'error');
-          return;
-        }
-        mutate((current) => ({ ...current, environments: [...current.environments, env] }), true);
-        toast(t(`已导入环境「${env.name}」，可在环境菜单中选用`, `Imported ${env.name}. Select it in the environment menu.`), 'success');
-        setSettingsModal(false);
+        if (importPostmanEnvironment(json, wsId)) setSettingsModal(false);
         return;
       }
       if (isPostmanCollection(json)) {
@@ -115,7 +107,7 @@ export const SettingsModal: React.FC = () => {
     } catch {
       /* 尝试按 cURL 文本文件导入 */
     }
-    const curls = parseCurlCommands(text);
+    const curls = parseCurlCommands(text, s.language);
     if (curls.length > 0) {
       applyBatchImport(curls);
       setSettingsModal(false);

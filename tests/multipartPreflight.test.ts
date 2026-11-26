@@ -1,4 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MultipartTable } from '../src/components/MultipartTable';
 import { emptyBody, newRequest, seedData } from '../src/lib/factory';
 import { executeRequest } from '../src/lib/requestRunner';
 import { kv } from '../src/lib/util';
@@ -28,4 +31,15 @@ it('allows an explicitly selected zero-byte file and ignores disabled missing fi
   const result = await executeRequest(data, { ...req, body }, new AbortController().signal);
   expect(result.error).toBeUndefined();
   expect(transport).toHaveBeenCalledOnce();
+});
+
+it('shows the missing-file warning only on the attachment that still needs selection', () => {
+  const attached = { ...file, id: 'selected', fileName: 'empty.txt', fileData: '' };
+  const body = { ...req.body, multipart: [file, attached] };
+  const html = renderToStaticMarkup(createElement(MultipartTable, { req: { ...req, body }, vars: new Map() }));
+  const rows = html.split('</tr>');
+  expect(rows[1]).toContain('README.md');
+  expect(rows[1]).toContain('class="pill pill-warning"');
+  expect(rows[2]).toContain('class="pill">empty.txt</span>');
+  expect(rows[2]).not.toContain('pill-warning');
 });

@@ -6,7 +6,8 @@ import { executeRequest } from '../lib/requestRunner';
 import { applyImport, importAll, type ImportOptions, type ImportPlan } from '../lib/curlImport';
 import type { ParsedCurl } from '../lib/curlParser';
 import { uid } from '../lib/util';
-import { tr } from '../lib/i18n';
+import { tr } from '../lib/translate';
+import { readPostmanEnvironment } from '../lib/postmanEnvironment';
 
 export interface ToastItem {
   id: string;
@@ -85,6 +86,7 @@ interface AppStore {
   // 环境
   setActiveEnvironment: (envId: string | null) => void;
   createEnvironment: (name: string, color?: string) => Environment;
+  importPostmanEnvironment: (doc: unknown, workspaceId: string) => Environment | null;
   updateEnvironment: (id: string, patch: Partial<Environment>) => void;
   deleteEnvironment: (id: string) => void;
 
@@ -356,6 +358,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const wsId = activeWsId(d);
     const env = newEnvironment(wsId, { name: name.trim() || tr(d.settings.language, '新环境', 'New Environment'), color });
     get().mutate((cur) => ({ ...cur, environments: [...cur.environments, env] }));
+    return env;
+  },
+
+  importPostmanEnvironment: (doc, workspaceId) => {
+    const { data, mutate, toast } = get();
+    const env = readPostmanEnvironment(doc, workspaceId);
+    if (!env) {
+      toast(tr(data.settings.language, 'Postman 环境文件格式无效，请检查环境名称与变量列表', 'Invalid Postman environment name or variable list'), 'error');
+      return null;
+    }
+    mutate(current => ({ ...current, environments: [...current.environments, env] }), true);
+    toast(tr(data.settings.language, `已导入环境「${env.name}」`, `Imported environment "${env.name}"`), 'success');
     return env;
   },
 

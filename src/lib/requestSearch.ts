@@ -17,21 +17,58 @@ export function parseRequestSearch(query: string) {
   return { methods, folders, filtered, text: filtered ? text.replace(/\s+/g, ' ') : text };
 }
 
-export function filterWorkspaceRequests(data: AppData, workspaceId: string, query: ReturnType<typeof parseRequestSearch>) {
-  const folderPaths = new Map<string, string>();
-  return data.requests.filter((request) => {
+type RequestSearch = ReturnType<typeof parseRequestSearch>;
+
+function searchWorkspace(data: AppData, workspaceId: string, query: RequestSearch) {
+  const folderMatches = new Map<string, boolean>();
+  const matchesFolder = (id: string | null) => {
+    if (!query.folders.length) return true;
+    if (!id) return false;
+    const cached = folderMatches.get(id);
+    if (cached !== undefined) return cached;
+    const path = folderChain(data, id).filter(f => f.workspaceId === workspaceId).map(f => f.name.toLowerCase()).join('/');
+    const matches = query.folders.every(term => path.includes(term));
+    folderMatches.set(id, matches);
+    return matches;
+  };
+  const requests = data.requests.filter((request) => {
     if (request.workspaceId !== workspaceId) return false;
     if (!request.name.toLowerCase().includes(query.text) && !request.url.toLowerCase().includes(query.text)) return false;
     if (query.methods.length && !query.methods.includes(request.method.toLowerCase())) return false;
-    if (!query.folders.length) return true;
-    if (!request.folderId) return false;
-    let path = folderPaths.get(request.folderId);
-    if (path === undefined) {
-      path = folderChain(data, request.folderId)
-        .filter((folder) => folder.workspaceId === workspaceId)
-        .map((folder) => folder.name.toLowerCase()).join('/');
-      folderPaths.set(request.folderId, path);
-    }
-    return query.folders.every((folder) => path.includes(folder));
+    return matchesFolder(request.folderId);
   });
+  return { requests, matchesFolder };
+}
+
+export function filterWorkspaceRequests(data: AppData, workspaceId: string, query: RequestSearch) {
+  return searchWorkspace(data, workspaceId, query).requests;
+}
+
+export function filterSidebarTree(data: AppData, workspaceId: string, query: RequestSearch) {
+  const { requests, matchesFolder } = searchWorkspace(data, workspaceId, query);
+  const requestIds = new Set(requests.map(r => r.id));
+  const folders = new Map(data.folders.filter(f => f.workspaceId === workspaceId).map(f => [f.id, f]));
+  const folderIds = new Set<string>();
+  const showAncestors = (id: string | null) => {
+    while (id && folders.has(id) && !folderIds.has(id)) {
+      folderIds.add(id);
+      id = folders.get(id)!.parentId;
+    }
+  };
+  const folderOnly = query.folders.length > 0 && !query.methods.length && !query.text;
+  for (const f of folders.values()) {
+    if (folderOnly && matchesFolder(f.id)) showAncestors(f.id);
+    if (!query.filtered && (f.name.toLowerCase().includes(query.text) || f.host?.toLowerCase().includes(query.text))) {
+      showAncestors(f.id);
+    }
+  }
+  for (const r of data.requests) {
+    if (r.workspaceId !== workspaceId) continue;
+    if (!query.filtered) {
+      const parent = r.folderId ? folders.get(r.folderId) : undefined;
+      if (parent?.name.toLowerCase().includes(query.text) || r.method.toLowerCase().includes(query.text)) requestIds.add(r.id);
+    }
+    if (requestIds.has(r.id)) showAncestors(r.folderId);
+  }
+  return { folderIds, requestIds };
 }

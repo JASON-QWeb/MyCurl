@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import type { Auth, BodyType, HttpRequest, MultipartField } from '../lib/types';
-import { findTemplateVars, folderChain, resolveVariables } from '../lib/template';
-import { resolveEffectiveAuth, resolveInheritedHeaders } from '../lib/requestRunner';
+import type { Auth, BodyType, HttpRequest } from '../lib/types';
+import { findTemplateVars, folderChain, render, resolveVariables } from '../lib/template';
+import { effectiveInheritedHeaders, resolveEffectiveAuth, resolveInheritedHeaders } from '../lib/requestRunner';
 import { syncParamsFromUrl, syncUrlFromParams } from '../lib/urlParams';
 import { copyText, kv, maskSecret, methodColor, uid } from '../lib/util';
 import { exportAsCurl } from '../lib/curlExport';
@@ -11,6 +11,7 @@ import { useI18n } from '../lib/i18n';
 import { TemplateInput } from './TemplateInput';
 import { CodeEditor } from './CodeEditor';
 import { KeyValueTable } from './KeyValueTable';
+import { MultipartTable } from './MultipartTable';
 import { MarkdownView } from './MarkdownView';
 import {
   IconCode,
@@ -18,10 +19,8 @@ import {
   IconDoc,
   IconFolder,
   IconKey,
-  IconPlus,
   IconSend,
   IconStop,
-  IconTrash,
   IconWand,
 } from './Icons';
 
@@ -78,7 +77,17 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
   const chain = useMemo(() => folderChain(data, req.folderId), [data, req.folderId]);
   const parentFolder = chain[chain.length - 1] ?? null;
   const effectiveAuth = useMemo(() => resolveEffectiveAuth(data, req), [data, req]);
-  const inheritedHeaders = useMemo(() => resolveInheritedHeaders(data, req.folderId), [data, req.folderId]);
+  const { inheritedHeaders, enabledHeadersCount } = useMemo(() => {
+    const localHeaders = req.headers.filter(h => h.enabled && h.key.trim());
+    const renderKey = (key: string) => render(key, vars);
+    const localHeaderNames = new Set(localHeaders.map(h => renderKey(h.key.trim()).toLowerCase()));
+    const inherited = resolveInheritedHeaders(data, req.folderId);
+    const effective = new Set(effectiveInheritedHeaders(inherited, localHeaderNames, renderKey).map(item => item.header));
+    return {
+      inheritedHeaders: inherited.map(h => ({ ...h, overridden: !effective.has(h) })),
+      enabledHeadersCount: localHeaders.length + effective.size,
+    };
+  }, [data, req.headers, req.folderId, vars]);
 
   const authVarPickerActions = useMemo(() => {
     const actions: { label: string; onClick: () => void }[] = [];
@@ -179,37 +188,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
     updateRequest(req.id, { auth: { ...req.auth, ...patch } });
   };
 
-  const updateMultipart = (id: string, patch: Partial<MultipartField>) => {
-    updateRequest(req.id, {
-      body: {
-        ...req.body,
-        multipart: req.body.multipart.map((m) => (m.id === id ? { ...m, ...patch } : m)),
-      },
-    });
-  };
-
-  const handleFilePick = (fieldId: string, file: File | null) => {
-    if (!file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      toast(t('单个上传文件请勿超过 15 MB', 'File size must not exceed 15 MB'), 'warning');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '');
-      const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      updateMultipart(fieldId, {
-        isFile: true,
-        fileName: file.name,
-        fileData: b64,
-        contentType: file.type || 'application/octet-stream',
-      });
-    };
-    reader.readAsDataURL(file);
-  };
-
   const enabledParamsCount = req.params.filter((p) => p.enabled && (p.key || p.value)).length;
-  const enabledHeadersCount = req.headers.filter((h) => h.enabled && h.key.trim()).length + inheritedHeaders.length;
   const hasAuth = effectiveAuth.auth.type !== 'none';
 
   const curlSecretMode = data.settings.curlCopySecretMode === 'resolve' ? 'resolve' : 'mask';
@@ -433,99 +412,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
               </div>
             )}
 
-            {req.body.type === 'multipart' && (
-              <div className="tab-scroll">
-                <table className="kv-table">
-                  <thead>
-                    <tr>
-                      <th className="kv-check" />
-                      <th style={{ width: '28%' }}>{t('字段名', 'Field')}</th>
-                      <th style={{ width: 82 }}>{t('类型', 'Type')}</th>
-                      <th>{t('值 / 文件', 'Value / File')}</th>
-                      <th className="kv-del" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {req.body.multipart.map((row) => (
-                      <tr key={row.id} className={`kv-row ${row.enabled ? '' : 'disabled'}`}>
-                        <td className="kv-check">
-                          <input
-                            type="checkbox"
-                            checked={row.enabled}
-                            onChange={(e) => updateMultipart(row.id, { enabled: e.target.checked })}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="input input-sm mono"
-                            style={{ width: '100%' }}
-                            value={row.key}
-                            placeholder={t('字段名', 'Field')}
-                            onChange={(e) => updateMultipart(row.id, { key: e.target.value })}
-                          />
-                        </td>
-                        <td>
-                          <select
-                            className="select select-sm"
-                            style={{ width: '100%' }}
-                            value={row.isFile ? 'file' : 'text'}
-                            onChange={(e) => updateMultipart(row.id, { isFile: e.target.value === 'file' })}
-                          >
-                            <option value="text">{t('文本', 'Text')}</option>
-                            <option value="file">{t('文件', 'File')}</option>
-                          </select>
-                        </td>
-                        <td>
-                          {row.isFile ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <input
-                                type="file"
-                                style={{ fontSize: 11.5, maxWidth: 210 }}
-                                onChange={(e) => handleFilePick(row.id, e.target.files?.[0] ?? null)}
-                              />
-                              {row.fileName && <span className="pill">{row.fileName}</span>}
-                            </div>
-                          ) : (
-                            <TemplateInput
-                              value={row.value}
-                              onChange={(v) => updateMultipart(row.id, { value: v })}
-                              vars={vars}
-                              bordered
-                              compact
-                            />
-                          )}
-                        </td>
-                        <td className="kv-del">
-                          <button
-                            className="btn btn-ghost btn-icon btn-sm"
-                            onClick={() =>
-                              updateRequest(req.id, {
-                                body: { ...req.body, multipart: req.body.multipart.filter((x) => x.id !== row.id) },
-                              })
-                            }
-                          >
-                            <IconTrash size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    className="btn btn-sm"
-                    onClick={() =>
-                      updateRequest(req.id, {
-                        body: { ...req.body, multipart: [...req.body.multipart, { ...kv('', ''), isFile: false }] },
-                      })
-                    }
-                  >
-                    <IconPlus size={13} />
-                    {t('添加字段', 'Add Field')}
-                  </button>
-                </div>
-              </div>
-            )}
+            {req.body.type === 'multipart' && <MultipartTable req={req} vars={vars} />}
 
             {req.body.type === 'graphql' && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -588,8 +475,11 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                 </div>
                 {inheritedHeaders.map((h, i) => (
                   <div key={i} className="mono" style={{ fontSize: 11.5, color: 'var(--text-dim)', padding: '2px 0' }}>
-                    <strong>{h.key}:</strong> {h.value}{' '}
-                    <span style={{ color: 'var(--text-muted)' }}>({h.inheritedFrom})</span>
+                    <span style={h.overridden ? { color: 'var(--text-muted)', textDecoration: 'line-through' } : undefined}>
+                      <strong>{h.key}:</strong> {h.value}{' '}
+                      <span style={{ color: 'var(--text-muted)' }}>({h.inheritedFrom})</span>
+                    </span>
+                    {h.overridden && <small style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{t('已覆盖', 'Overridden')}</small>}
                   </div>
                 ))}
               </div>

@@ -15,7 +15,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseOllamaStream(body: string, receiving: boolean): ResponseStream | null {
   const stream: ResponseStream = { format: 'NDJSON', events: [], assembledText: '', assembledReasoning: '', done: false };
-  const lines = body.split('\n');
+  const lines = body.split(/\r\n?|\n/);
 
   for (const [index, line] of lines.entries()) {
     const data = line.trim();
@@ -29,9 +29,9 @@ function parseOllamaStream(body: string, receiving: boolean): ResponseStream | n
       return null;
     }
     if (!isRecord(chunk)) return null;
-    if (stream.events.length > 0 && typeof chunk.error === 'string') {
+    if (typeof chunk.error === 'string' && (stream.events.length > 0 || Object.keys(chunk).length === 1)) {
       stream.events.push({ data, event: 'error' });
-      stream.error = chunk.error;
+      stream.error = chunk.error.replace(/\r\n?/g, '\n');
       continue;
     }
     if (typeof chunk.model !== 'string' || typeof chunk.done !== 'boolean') return null;
@@ -44,7 +44,16 @@ function parseOllamaStream(body: string, receiving: boolean): ResponseStream | n
     stream.done ||= chunk.done;
     stream.events.push({ data });
   }
-  return stream.events.length ? stream : null;
+  if (!stream.events.length) return null;
+  stream.assembledText = stream.assembledText.replace(/\r\n?/g, '\n');
+  stream.assembledReasoning = stream.assembledReasoning.replace(/\r\n?/g, '\n');
+  return stream;
+}
+
+export function streamCopyText(stream: ResponseStream, raw: string, chatView: boolean): string {
+  if (stream.format === 'SSE') return stream.assembledText || raw;
+  if (!chatView) return raw;
+  return stream.assembledText || stream.error || stream.assembledReasoning || raw;
 }
 
 export function parseResponseStream(contentType: string, body: string, receiving = false): ResponseStream | null {

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { HttpRequest, ResponseRecord } from '../lib/types';
 import { applyFilterToText } from '../lib/jq';
-import { parseResponseStream } from '../lib/responseStream';
+import { parseResponseStream, streamCopyText } from '../lib/responseStream';
 import { prettyJson } from '../lib/curlParser';
 import { copyText, formatBytes, formatMs, maskSecret, relativeTime } from '../lib/util';
 import { useI18n } from '../lib/i18n';
@@ -47,7 +47,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     deleteResponseHistory,
     toast,
   } = useAppStore();
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
 
   const jqPresets = [
     { label: t('AI 回复', 'AI Reply'), expr: '.choices[0].message.content // .error.message // .' },
@@ -81,18 +81,19 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
   const filterExpr = req.responseFilter ?? '';
   const filterResult = useMemo(() => {
     if (!resp || !resp.body || !filterExpr.trim() || !filterEnabled || stream) return null;
-    return applyFilterToText(filterExpr.trim(), resp.body);
-  }, [resp, filterExpr, filterEnabled, stream]);
+    return applyFilterToText(filterExpr.trim(), resp.body, lang);
+  }, [resp, filterExpr, filterEnabled, stream, lang]);
 
   const displayedBody = useMemo(() => {
     if (!resp) return '';
+    if (stream) return resp.body;
     if (filterResult?.ok) return filterResult.output;
     if (bodyMode === 'pretty') {
       const p = prettyJson(resp.body);
       if (p !== null) return p;
     }
     return resp.body;
-  }, [resp, filterResult, bodyMode]);
+  }, [resp, filterResult, bodyMode, stream]);
 
   const editorLang: CodeLang = useMemo(() => {
     if (!resp) return 'text';
@@ -103,17 +104,27 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     return bodyMode === 'raw' ? 'text' : detectLang(resp.contentType, resp.body);
   }, [resp, filterResult, bodyMode]);
 
+  const copyBody = async () => {
+    try {
+      await copyText(stream ? streamCopyText(stream, displayedBody, bodyMode === 'pretty') : displayedBody);
+      toast(t('已复制响应内容', 'Copied response'), 'success');
+    } catch {
+      toast(t('无法复制响应内容', 'Could not copy the response'), 'error');
+    }
+  };
+
   const downloadBody = () => {
     if (!resp) return;
+    const ndjson = stream?.format === 'NDJSON';
     const blob = resp.bodyBase64
       ? new Blob([Uint8Array.from(atob(resp.bodyBase64), (c) => c.charCodeAt(0))], { type: resp.contentType || 'application/octet-stream' })
-      : new Blob([stream?.format === 'NDJSON' ? resp.body : displayedBody], { type: 'text/plain;charset=utf-8' });
+      : new Blob([ndjson ? resp.body : displayedBody], { type: ndjson ? 'application/x-ndjson;charset=utf-8' : 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    const ext = stream?.format === 'NDJSON' ? 'ndjson' : resp.contentType.includes('json') ? 'json' : resp.contentType.includes('html') ? 'html' : 'txt';
+    const ext = ndjson ? 'ndjson' : resp.contentType.includes('json') ? 'json' : resp.contentType.includes('html') ? 'html' : 'txt';
     a.download = `${req.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}.${ext}`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(() => URL.revokeObjectURL(a.href), 0);
   };
 
   const filteredHeaders = useMemo(() => {
@@ -167,10 +178,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               <button
                 className="btn btn-ghost btn-icon btn-sm"
                 title={t('复制当前显示内容', 'Copy response')}
-                onClick={() => {
-                  copyText(stream?.assembledText && (stream.format === 'SSE' || bodyMode === 'pretty') ? stream.assembledText : displayedBody);
-                  toast(t('已复制响应内容', 'Copied response'), 'success');
-                }}
+                onClick={copyBody}
               >
                 <IconCopy size={13} />
               </button>
@@ -372,40 +380,46 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   </div>
                 ) : stream && bodyMode === 'pretty' ? (
                   <div className="sse-view">
-                    {stream.error && <div className="jq-error" role="alert">{stream.error}</div>}
+                    {stream.error && (
+                      <div className="jq-error" role="alert">{t(`流式响应错误：${stream.error}`, `Stream error: ${stream.error}`)}</div>
+                    )}
                     {stream.assembledReasoning && (
                       <div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>{t('思考过程', 'Reasoning')}</div>
                         <div className="sse-reasoning">{stream.assembledReasoning}</div>
                       </div>
                     )}
-                    <div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>
-                          {t(
-                            `AI 流式回复拼接（共 ${stream.events.length} 个事件${stream.done ? ' · 已结束' : ''}）`,
-                            `Assembled ${stream.format} stream (${stream.events.length} events${stream.done ? ' · Done' : ''})`,
-                          )}
-                        </span>
-                      </div>
-                      <div className="sse-answer-box">
-                        {stream.assembledText || (
-                          <span style={{ color: 'var(--text-muted)' }}>
+                    {(!stream.error || stream.assembledText) && (
+                      <div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+                          <span>
                             {t(
-                              '（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）',
-                              '(No text delta parsed yet — switch to "Events" or "Raw" to inspect)',
+                              `AI 流式回复拼接（共 ${stream.events.length} 个事件${stream.done ? ' · 已结束' : ''}）`,
+                              `Assembled ${stream.format} stream (${stream.events.length} events${stream.done ? ' · Done' : ''})`,
                             )}
                           </span>
-                        )}
+                        </div>
+                        <div className="sse-answer-box">
+                          {stream.assembledText || (
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              {t(
+                                '（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）',
+                                '(No text delta parsed yet — switch to "Events" or "Raw" to inspect)',
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 ) : stream && bodyMode === 'preview' ? (
                   <div className="tab-scroll" style={{ padding: 0 }}>
                     {stream.events.map((ev, idx) => (
                       <div key={idx} className="sse-event-row">
                         <span style={{ color: 'var(--text-muted)', width: 32, flexShrink: 0 }}>#{idx + 1}</span>
-                        {ev.event && <span className="pill pill-accent">{ev.event}</span>}
+                        {ev.event && <span className="pill pill-accent">{
+                          stream.format === 'NDJSON' && ev.event === 'error' ? t('错误', 'Error') : ev.event
+                        }</span>}
                         <span style={{ wordBreak: 'break-all', color: 'var(--text-dim)' }}>{ev.data}</span>
                       </div>
                     ))}

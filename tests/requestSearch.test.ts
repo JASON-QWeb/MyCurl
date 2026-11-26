@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newFolder, newRequest, seedData } from '../src/lib/factory';
-import { filterWorkspaceRequests, parseRequestSearch } from '../src/lib/requestSearch';
+import { filterSidebarTree, filterWorkspaceRequests, parseRequestSearch } from '../src/lib/requestSearch';
 
 describe('command palette request search', () => {
   const data = seedData();
@@ -34,5 +34,26 @@ describe('command palette request search', () => {
     }
     expect(search('Invoice status')).toEqual([nested, direct, unfiled]);
     expect(search('missing')).toEqual([]);
+  });
+
+  it('keeps only ancestor paths for combined filters, and includes empty folders for folder-only searches', () => {
+    const empty = newFolder(ws, root.id, { name: 'Archive' });
+    const unrelated = newFolder(ws, null, { name: 'Unrelated' });
+    const extended = { ...data, folders: [...data.folders, empty, unrelated] };
+    const tree = (query: string) => filterSidebarTree(extended, ws, parseRequestSearch(query));
+    expect(tree('method:POST folder:"Billing Ops" /V1/')).toEqual({
+      folderIds: new Set([root.id, child.id]), requestIds: new Set([nested.id]),
+    });
+    expect(tree('method:POST').requestIds).toEqual(new Set([nested.id, unfiled.id]));
+    expect(tree('folder:"billing ops"').folderIds).toEqual(new Set([root.id, child.id, empty.id]));
+    expect(tree('method:GET folder:archive')).toEqual({ folderIds: new Set(), requestIds: new Set() });
+  });
+
+  it('preserves ordinary sidebar method, folder name and host searches', () => {
+    const extended = { ...data, folders: [{ ...root, host: 'billing.local' }, child] };
+    const tree = (query: string) => filterSidebarTree(extended, ws, parseRequestSearch(query));
+    expect(tree('post').requestIds).toEqual(new Set([nested.id, unfiled.id]));
+    expect(tree('billing ops')).toEqual({ folderIds: new Set([root.id]), requestIds: new Set([direct.id]) });
+    expect(tree('billing.local')).toEqual({ folderIds: new Set([root.id]), requestIds: new Set() });
   });
 });

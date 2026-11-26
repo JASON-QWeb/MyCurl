@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseResponseStream } from '../src/lib/responseStream';
+import { parseResponseStream, streamCopyText } from '../src/lib/responseStream';
 
 const mime = 'application/x-ndjson; charset=utf-8';
 const generateChunk = (response: string, done: boolean) => JSON.stringify({ model: 'gemma4', response, done });
@@ -38,9 +38,26 @@ describe('Ollama response streams', () => {
     expect(stream?.events[1].event).toBe('error');
   });
 
+  it('copies chat text with normalized line endings and preserves raw NDJSON in other views', () => {
+    const raw = [generateChunk('a\r', false), generateChunk('\nb\rc', true)].join('\r\n') + '\r\n';
+    const stream = parseResponseStream(mime, raw)!;
+    expect(streamCopyText(stream, raw, true)).toBe('a\nb\nc');
+    expect(streamCopyText(stream, raw, false)).toBe(raw);
+  });
+
+  it('keeps error-only and reasoning-only streams readable and copyable', () => {
+    const raw = '{"error":"model unavailable"}\r';
+    const error = parseResponseStream(mime, raw)!;
+    expect(error.events).toEqual([{ data: raw.trim(), event: 'error' }]);
+    expect(streamCopyText(error, raw, true)).toBe('model unavailable');
+    const thinking = chatChunk('', 'one\r\ntwo', false);
+    expect(streamCopyText(parseResponseStream(mime, thinking)!, thinking, true)).toBe('one\ntwo');
+  });
+
   it('leaves ordinary JSON, unrelated NDJSON and malformed records available in the regular viewer', () => {
     expect(parseResponseStream('application/json', generateChunk('That', true))).toBeNull();
     expect(parseResponseStream(mime, '{"status":"success"}\n')).toBeNull();
+    expect(parseResponseStream(mime, '{"level":"warn","error":"unrelated log entry"}\n')).toBeNull();
     expect(parseResponseStream(mime, generateChunk('That', false) + '\n{broken}\n', true)).toBeNull();
   });
 

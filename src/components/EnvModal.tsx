@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Variable } from '../lib/types';
 import { copyText, maskSecret, uid } from '../lib/util';
 import { useI18n } from '../lib/i18n';
-import { IconCopy, IconEye, IconEyeOff, IconFolder, IconKey, IconLayers, IconPlus, IconTrash, IconX } from './Icons';
+import { IconCopy, IconEye, IconEyeOff, IconFolder, IconKey, IconLayers, IconPlus, IconTrash, IconUpload, IconX } from './Icons';
 
 const COLORS = ['#22c55e', '#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
 
@@ -13,6 +13,7 @@ export const EnvModal: React.FC = () => {
     envModal,
     setEnvModal,
     createEnvironment,
+    importPostmanEnvironment,
     updateEnvironment,
     deleteEnvironment,
     selectFolder,
@@ -25,6 +26,7 @@ export const EnvModal: React.FC = () => {
   const baseEnv = envs.find((e) => e.isBase) ?? envs[0];
   const [selectedId, setSelectedId] = useState<string>('__vault__');
   const [newName, setNewName] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
   // 汇总所有文件夹 + 环境中的密钥
@@ -70,6 +72,16 @@ export const EnvModal: React.FC = () => {
   if (!envModal) return null;
 
   const activeEnv = envs.find((e) => e.id === selectedId) ?? (selectedId === '__vault__' ? null : baseEnv);
+
+  const importFile = async (file?: File) => {
+    if (!file) return;
+    try {
+      const env = importPostmanEnvironment(JSON.parse(await file.text()), wsId);
+      if (env) setSelectedId(env.id);
+    } catch {
+      toast(t('无法读取环境 JSON 文件', 'Could not read the environment JSON file'), 'error');
+    }
+  };
 
   const updateVar = (envId: string, varId: string, patch: Partial<Variable>) => {
     const env = envs.find((e) => e.id === envId);
@@ -128,34 +140,55 @@ export const EnvModal: React.FC = () => {
             <div className="menu-sep" />
             <div className="menu-title">{t('环境列表', 'Environments')}</div>
 
-            {envs.map((e) => (
-              <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <button
-                  className={`menu-item ${activeEnv?.id === e.id ? 'active' : ''}`}
-                  onClick={() => setSelectedId(e.id)}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}>
-                    <span className="env-dot" style={{ background: e.isBase ? 'var(--text-muted)' : e.color || 'var(--accent)' }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.variables.length}</span>
-                </button>
-                {!e.isBase && (
+            <div style={{ display: 'grid', gap: 4, minHeight: 0, overflowY: 'auto' }}>
+              {envs.map((e) => (
+                <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <button
-                    className="btn btn-ghost btn-icon btn-sm"
-                    onClick={() => {
-                      deleteEnvironment(e.id);
-                      if (selectedId === e.id) setSelectedId('__vault__');
-                    }}
-                    title={t('删除环境', 'Delete environment')}
+                    className={`menu-item ${activeEnv?.id === e.id ? 'active' : ''}`}
+                    onClick={() => setSelectedId(e.id)}
                   >
-                    <IconTrash size={12} />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}>
+                      <span className="env-dot" style={{ background: e.isBase ? 'var(--text-muted)' : e.color || 'var(--accent)' }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.variables.length}</span>
                   </button>
-                )}
-              </div>
-            ))}
+                  {!e.isBase && (
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      onClick={() => {
+                        deleteEnvironment(e.id);
+                        if (selectedId === e.id) setSelectedId('__vault__');
+                      }}
+                      title={t('删除环境', 'Delete environment')}
+                    >
+                      <IconTrash size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
 
-            <div style={{ marginTop: 'auto', paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".json,application/json"
+              hidden
+              onChange={e => {
+                const file = e.currentTarget.files?.[0];
+                e.currentTarget.value = '';
+                void importFile(file);
+              }}
+            />
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 'auto', alignSelf: 'flex-start' }}
+              onClick={() => fileInput.current?.click()}
+            >
+              <IconUpload size={12} />
+              {t('导入环境', 'Import Env')}
+            </button>
+            <div style={{ paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
               <input
                 className="input input-sm"
                 style={{ flex: 1, minWidth: 0 }}

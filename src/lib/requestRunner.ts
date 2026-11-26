@@ -4,6 +4,7 @@
 import type { AppData, Auth, Folder, HttpRequest, KV, ResponseRecord } from './types';
 import { folderChain, renderTemplate, resolveVariables, type VarMap } from './template';
 import { uid } from './util';
+import { tr } from './translate';
 import { responseTextDecoder } from './responseEncoding';
 import { splitUrl } from './urlParams';
 import { createTauriChannel, isTauri, tauriInvoke } from './bridge';
@@ -44,6 +45,16 @@ export function resolveInheritedHeaders(data: AppData, folderId: string | null):
     }
   }
   return out;
+}
+
+export function effectiveInheritedHeaders(headers: EffectiveHeader[], localHeaderNames: Set<string>, renderKey: (key: string) => string) {
+  const inherited = new Map<string, { key: string; header: EffectiveHeader }>();
+  for (const header of headers) {
+    const key = renderKey(header.key.trim());
+    const name = key.toLowerCase();
+    if (!localHeaderNames.has(name)) inherited.set(name, { key, header });
+  }
+  return Array.from(inherited.values());
 }
 
 export interface PreparedRequest {
@@ -94,13 +105,9 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
     .filter((h) => h.enabled && h.key.trim())
     .map((h): [string, string] => [r(h.key.trim()), r(h.value)]);
   const localNames = new Set(localHeaders.map(([key]) => key.toLowerCase()));
-  const inherited = new Map<string, [string, string]>();
-  for (const h of resolveInheritedHeaders(data, req.folderId)) {
-    const key = r(h.key.trim());
-    if (!localNames.has(key.toLowerCase())) inherited.set(key.toLowerCase(), [key, h.value]);
-  }
+  const inherited = effectiveInheritedHeaders(resolveInheritedHeaders(data, req.folderId), localNames, r);
   const hdrList: [string, string][] = [
-    ...Array.from(inherited.values(), ([key, value]): [string, string] => [key, r(value)]),
+    ...inherited.map(({ key, header }): [string, string] => [key, r(header.value)]),
     ...localHeaders,
   ];
   const hasHeader = (k: string) => hdrList.some(([hk]) => hk.toLowerCase() === k.toLowerCase());
@@ -261,9 +268,11 @@ export async function executeRequest(
     const missingFiles = prepared.body.fields.filter((field) => field.isFile && field.data == null);
     if (missingFiles.length) {
       const fields = missingFiles.map((field) => field.name).join(', ');
-      const error = data.settings.language === 'en'
-        ? `Select a local file before sending. Multipart fields: ${fields}`
-        : `请先选择要上传的本地文件。缺少附件的表单字段：${fields}`;
+      const error = tr(
+        data.settings.language,
+        `请先选择要上传的本地文件。缺少附件的表单字段：${fields}`,
+        `Select a local file before sending. Multipart fields: ${fields}`,
+      );
       return { ...record, error };
     }
   }

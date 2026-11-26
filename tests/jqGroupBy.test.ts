@@ -34,5 +34,7 @@ describe('jq group_by', () => {
   it('rejects invalid inputs through the response filter entry point', () => {
     for (const value of ['"abc"', '{}', 'null', '42']) expect(applyFilterToText('group_by(.)', value).ok).toBe(false);
     expect(applyFilterToText('group_by(.a; .b)', '[]').ok).toBe(false);
+    expect(applyFilterToText('group_by(.)', '42', 'en')).toEqual({ ok: false, error: 'group_by requires an array' });
+    expect(applyFilterToText('group_by(.)', '42', 'zh')).toEqual({ ok: false, error: 'group_by 需要数组' });
   });
 });
