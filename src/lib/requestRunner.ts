@@ -261,10 +261,6 @@ export async function executeRequest(
     requestBodyPreview: prepared.bodyPreview,
   };
 
-  if (!prepared.url) {
-    return { ...record, error: '请输入请求 URL' };
-  }
-
   if (prepared.body.kind === 'multipart') {
     const missingFiles = prepared.body.fields.filter((field) => field.isFile && field.data == null);
     if (missingFiles.length) {
@@ -274,6 +270,10 @@ export async function executeRequest(
         : `请先选择要上传的本地文件。缺少附件的表单字段：${fields}`;
       return { ...record, error };
     }
+  }
+
+  if (!prepared.url) {
+    return { ...record, error: '请输入请求 URL' };
   }
 
   const textDecoder = new TextDecoder('utf-8', { fatal: false });
