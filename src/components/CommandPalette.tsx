@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { methodColor, methodShort } from '../lib/util';
+import { filterWorkspaceRequests, parseRequestSearch } from '../lib/requestSearch';
 import { useI18n } from '../lib/i18n';
 import { IconDoc, IconFolder, IconLayers, IconPlus, IconSearch, IconSettings, IconSparkles } from './Icons';
 
@@ -45,6 +46,7 @@ export const CommandPalette: React.FC = () => {
   const wsId = data.settings.activeWorkspaceId || data.workspaces[0].id;
 
   const items = useMemo(() => {
+    const search = parseRequestSearch(query);
     const actions: PaletteItem[] = [
       {
         id: 'act:import',
@@ -95,8 +97,7 @@ export const CommandPalette: React.FC = () => {
         run: () => selectFolder(f.id),
       }));
 
-    const reqItems: PaletteItem[] = data.requests
-      .filter((r) => r.workspaceId === wsId)
+    const reqItems: PaletteItem[] = filterWorkspaceRequests(data, wsId, search)
       .map((r) => ({
         id: `req:${r.id}`,
         label: r.name,
@@ -106,12 +107,10 @@ export const CommandPalette: React.FC = () => {
         run: () => selectRequest(r.id),
       }));
 
-    const all = [...actions, ...reqItems, ...folderItems];
-    const q = query.trim().toLowerCase();
-    if (!q) return all.slice(0, 20);
-    return all
-      .filter((it) => it.label.toLowerCase().includes(q) || (it.sub && it.sub.toLowerCase().includes(q)))
-      .slice(0, 24);
+    if (search.filtered) return reqItems.slice(0, 24);
+    const match = (it: PaletteItem) =>
+      it.label.toLowerCase().includes(search.text) || it.sub?.toLowerCase().includes(search.text);
+    return [...actions.filter(match), ...reqItems, ...folderItems.filter(match)].slice(0, search.text ? 24 : 20);
   }, [data, wsId, query, lang]);
 
   if (!commandPalette) return null;
@@ -134,7 +133,7 @@ export const CommandPalette: React.FC = () => {
           <IconSearch size={15} />
           <input
             ref={inputRef}
-            placeholder={t('搜索请求、文件夹、或执行操作…', 'Search requests, folders, or actions…')}
+            placeholder={t('搜索或执行操作 · method:POST folder:名称', 'Search or run an action · method:POST folder:name')}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
