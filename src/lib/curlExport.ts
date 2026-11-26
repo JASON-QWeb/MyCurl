@@ -2,7 +2,7 @@
  * 导出请求为 cURL / JavaScript fetch / Python requests，以及生成文件夹与工作区 Markdown API 文档
  */
 import type { AppData, Folder, HttpRequest } from './types';
-import { prepareRequest, resolveEffectiveAuth } from './requestRunner';
+import { prepareRequest, resolveEffectiveAuth, type PreparedRequest } from './requestRunner';
 import { folderChain, resolveVariables, type VarMap } from './template';
 import { formatTime, maskSecret } from './util';
 
@@ -100,15 +100,45 @@ export function exportAsFetch(data: AppData, req: HttpRequest, opts: CodeGenOpti
   return lines.join('\n');
 }
 
+function pythonMultipartBody(body: Extract<PreparedRequest['body'], { kind: 'multipart' }>): string[] {
+  const lines: string[] = [];
+  if (body.fields.some((field) => field.isFile)) {
+    lines.push('# Set each Path to the local file you want to upload.');
+  }
+  lines.push('fields = [');
+  for (const field of body.fields) {
+    const name = JSON.stringify(field.name);
+    if (field.isFile) {
+      const filename = JSON.stringify(field.fileName?.split(/[\\/]/).pop() || 'file');
+      const mime = JSON.stringify(field.contentType || 'application/octet-stream');
+      lines.push(`    (${name}, (${filename}, Path(${filename}).read_bytes(), ${mime})),`);
+    } else {
+      lines.push(`    (${name}, ${JSON.stringify(field.value ?? '')}),`);
+    }
+  }
+  lines.push(']', 'payload, headers["Content-Type"] = encode_multipart_formdata(fields)');
+  return lines;
+}
+
 export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOptions = { secretMode: 'mask' }): string {
   const vars = buildVarMap(data, req, opts.secretMode);
   const prep = prepareRequest(data, req, vars);
   const headersObj: Record<string, string> = {};
-  for (const [k, v] of prep.headers) headersObj[k] = v;
+  const multipart = prep.body.kind === 'multipart';
+  for (const [k, v] of prep.headers) {
+    if (multipart && /^(content-type|content-length)$/i.test(k)) continue;
+    headersObj[k] = v;
+  }
 
-  const lines: string[] = ['import requests', ''];
+  const lines: string[] = [];
+  if (prep.body.kind === 'multipart') {
+    if (prep.body.fields.some((field) => field.isFile)) lines.push('from pathlib import Path');
+    lines.push('from urllib3.filepost import encode_multipart_formdata');
+  }
+  lines.push('import requests', '');
   lines.push(`url = ${JSON.stringify(prep.url)}`);
-  if (Object.keys(headersObj).length) {
+  const hasHeaders = multipart || Object.keys(headersObj).length > 0;
+  if (hasHeaders) {
     lines.push(`headers = ${JSON.stringify(headersObj, null, 4)}`);
   }
   let bodyArg = '';
@@ -131,7 +161,11 @@ export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOpt
       bodyArg = ', data=payload';
     }
   }
-  const hArg = Object.keys(headersObj).length ? ', headers=headers' : '';
+  if (prep.body.kind === 'multipart') {
+    lines.push(...pythonMultipartBody(prep.body));
+    bodyArg = ', data=payload';
+  }
+  const hArg = hasHeaders ? ', headers=headers' : '';
   lines.push('');
   lines.push(`resp = requests.request(${JSON.stringify(prep.method)}, url${hArg}${bodyArg})`);
   lines.push('print(resp.status_code)');
