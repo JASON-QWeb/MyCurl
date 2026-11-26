@@ -8,6 +8,7 @@ import * as storage from '../src/lib/storage';
 import * as util from '../src/lib/util';
 import { useAppStore } from '../src/store/useAppStore';
 import { button, click, renderComponent } from './renderComponent';
+import { importWorkspace } from './importWorkspace';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -15,6 +16,37 @@ beforeEach(() => {
   vi.spyOn(storage, 'deleteHistoryItem').mockResolvedValue();
 });
 afterEach(() => vi.useRealTimers());
+
+it.each(['en', 'zh'] as const)('shows one syntax warning next to Format only for an invalid JSON body in %s', async lang => {
+  const { data, ws } = importWorkspace(lang);
+  data.requests = [newRequest(ws, null, { body: { ...emptyBody(), type: 'json', text: '' } })];
+  useAppStore.setState({ data });
+  function CurrentRequest() {
+    const req = useAppStore(state => state.data.requests[0]);
+    return createElement(RequestPane, { req, dark: true });
+  }
+  const { container } = renderComponent(createElement(CurrentRequest));
+  const warnings = () => container.querySelectorAll<HTMLElement>('.sub-toolbar .pill-warning');
+  const edit = (text: string) => {
+    const editor = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!;
+    act(() => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } }));
+  };
+  expect(warnings()).toHaveLength(0);
+  edit('{"limit":{{limit}},"label":"{{name}}"}');
+  expect(warnings()).toHaveLength(0);
+  edit('{"limit":1,}');
+  expect(warnings()).toHaveLength(1);
+  expect(warnings()[0].textContent).toBe(lang === 'en' ? 'Invalid JSON' : 'JSON 语法有误');
+  expect(warnings()[0].title.trim()).not.toBe('');
+  expect(warnings()[0].previousElementSibling).toBe(button(container, lang === 'en' ? 'Format' : '格式化'));
+  await click(button(container, lang === 'en' ? 'Text' : '纯文本'));
+  expect(warnings()).toHaveLength(0);
+  await click(button(container, 'JSON'));
+  expect(warnings()).toHaveLength(1);
+  edit('{"limit":1}');
+  expect(warnings()).toHaveLength(0);
+  expect(useAppStore.getState().toasts).toHaveLength(0);
+});
 
 it('fills a missing folder secret in place and refreshes decorations without replacing the editor or cursor', async () => {
   const data = seedData();

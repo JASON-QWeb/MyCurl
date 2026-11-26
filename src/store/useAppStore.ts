@@ -9,7 +9,7 @@ import { parseCurlCommands, type ParsedCurl } from '../lib/curlParser';
 import { SECRET_NAME_RE } from '../lib/template';
 import { isDarkTheme, kv, uid } from '../lib/util';
 import { tr } from '../lib/translate';
-import { readPostmanEnvironment } from '../lib/postmanEnvironment';
+import { createEnvironmentActions } from './environmentActions';
 import type { SaveTargetScope } from '../lib/responseExtract';
 
 export interface ToastItem {
@@ -35,7 +35,7 @@ export interface InFlightState {
   partial: ResponseRecord;
 }
 
-interface AppStore {
+export interface AppStore {
   data: AppData;
   loaded: boolean;
   saving: boolean;
@@ -79,6 +79,7 @@ interface AppStore {
   selectRequest: (id: string) => void;
   selectFolder: (id: string, tab?: 'overview' | 'vars' | 'auth' | 'headers') => void;
   toggleFolder: (id: string, force?: boolean) => void;
+  setAllFoldersExpanded: (workspaceId: string, expanded: boolean) => void;
   setSidebarFilter: (q: string) => void;
 
   // 工作区
@@ -90,6 +91,9 @@ interface AppStore {
   // 环境
   setActiveEnvironment: (envId: string | null) => void;
   createEnvironment: (name: string, color?: string) => Environment;
+  duplicateEnvironment: (id: string) => Environment | null;
+  importEnvironmentFile: (text: string, workspaceId: string, fileName?: string) => Environment | null;
+  importDotEnvEnvironment: (text: string, workspaceId: string, fileName?: string) => Environment | null;
   importPostmanEnvironment: (doc: unknown, workspaceId: string) => Environment | null;
   updateEnvironment: (id: string, patch: Partial<Environment>) => void;
   deleteEnvironment: (id: string) => void;
@@ -262,6 +266,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
 
+  setAllFoldersExpanded: (workspaceId, expanded) => {
+    set(state => {
+      const expandedFolders = { ...state.expandedFolders };
+      for (const folder of state.data.folders) {
+        if (folder.workspaceId === workspaceId) expandedFolders[folder.id] = expanded;
+      }
+      return { expandedFolders };
+    });
+  },
+
   setSidebarFilter: (q) => set({ sidebarFilter: q }),
 
   setActiveWorkspace: (id) => {
@@ -346,17 +360,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     return env;
   },
 
-  importPostmanEnvironment: (doc, workspaceId) => {
-    const { data, mutate, toast } = get();
-    const env = readPostmanEnvironment(doc, workspaceId);
-    if (!env) {
-      toast(tr(data.settings.language, 'Postman 环境文件格式无效，请检查环境名称与变量列表', 'Invalid Postman environment name or variable list'), 'error');
-      return null;
-    }
-    mutate(current => ({ ...current, environments: [...current.environments, env] }), true);
-    toast(tr(data.settings.language, `已导入环境「${env.name}」`, `Imported environment "${env.name}"`), 'success');
-    return env;
-  },
+  ...createEnvironmentActions(get),
 
   updateEnvironment: (id, patch) => {
     get().mutate((d) => ({

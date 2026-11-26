@@ -75,6 +75,11 @@ function getDispatcher(verifySSL, proxy) {
 }
 
 const FORBIDDEN = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'expect', 'content-length', 'host']);
+const REDIRECT_CREDENTIAL_HEADERS = new Set([
+  'authorization', 'proxy-authorization', 'cookie', 'x-api-key', 'api-key', 'apikey',
+  'x-auth-token', 'x-auth-key', 'x-goog-api-key', 'ocp-apim-subscription-key',
+  'private-token', 'x-access-token', 'access-token',
+]);
 
 function buildMultipart(fields) {
   const boundary = `----MyCurlBoundary${randomBytes(12).toString('hex')}`;
@@ -181,7 +186,7 @@ async function handleSend(req, res) {
     const dispatcher = getDispatcher(verifySSL, payload.options?.proxy);
 
     // 请求头
-    const hdrs = [];
+    let hdrs = [];
     const has = (name) => hdrs.some(([k]) => k.toLowerCase() === name);
     for (const [k, v] of payload.headers || []) {
       if (!k || FORBIDDEN.has(String(k).toLowerCase())) continue;
@@ -227,7 +232,7 @@ async function handleSend(req, res) {
       const loc = resp.headers.location;
       if (follow && [301, 302, 303, 307, 308].includes(resp.statusCode) && loc && i < MAX_REDIRECTS) {
         await resp.body.dump().catch(() => {});
-        const next = new URL(Array.isArray(loc) ? loc[0] : loc, url).toString();
+        const next = new URL(Array.isArray(loc) ? loc[0] : loc, url);
         redirects.push(`${resp.statusCode} → ${next}`);
         if (resp.statusCode === 303 || ((resp.statusCode === 301 || resp.statusCode === 302) && method === 'POST')) {
           method = 'GET';
@@ -235,10 +240,10 @@ async function handleSend(req, res) {
           for (let j = hdrs.length - 1; j >= 0; j--) if (hdrs[j][0].toLowerCase() === 'content-type') hdrs.splice(j, 1);
         }
         // 跨域重定向时去掉认证头
-        if (new URL(next).host !== new URL(url).host) {
-          for (let j = hdrs.length - 1; j >= 0; j--) if (['authorization', 'cookie'].includes(hdrs[j][0].toLowerCase())) hdrs.splice(j, 1);
+        if (next.origin !== new URL(url).origin) {
+          hdrs = hdrs.filter(([name]) => !REDIRECT_CREDENTIAL_HEADERS.has(name.toLowerCase()));
         }
-        url = next;
+        url = next.href;
         continue;
       }
       break;

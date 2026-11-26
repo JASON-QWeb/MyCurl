@@ -6,6 +6,7 @@ import { collectRequestVarNames, resolveEffectiveAuth, resolveRequestHeaders } f
 import { syncParamsFromUrl, syncUrlFromParams } from '../lib/urlParams';
 import { kv, maskSecret, methodColor, uid } from '../lib/util';
 import { prettyJson } from '../lib/curlParser';
+import { checkJsonBodySyntax } from '../lib/jsonCheck';
 import { useI18n } from '../lib/i18n';
 import { TemplateInput } from './TemplateInput';
 import { CodeEditor } from './CodeEditor';
@@ -69,6 +70,8 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
     req.body.type !== 'none' ? 'body' : 'params',
   );
   const [editingDoc, setEditingDoc] = useState(false);
+  const jsonCheck = useMemo(() => tab === 'body' && req.body.type === 'json'
+    ? checkJsonBodySyntax(req.body.text) : null, [tab, req.body.type, req.body.text]);
 
   const sending = !!inFlight[req.id];
   const vars = useMemo(() => resolveVariables(data, req.workspaceId, req.folderId),
@@ -324,11 +327,16 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
                   </button>
                 ))}
               </div>
-              {req.body.type === 'json' && (
-                <button className="btn btn-sm btn-ghost" onClick={formatJsonBody} title={t('格式化 JSON', 'Format JSON')}>
-                  <IconWand size={12} />
-                  {t('格式化', 'Format')}
-                </button>
+              {jsonCheck && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <button className="btn btn-sm btn-ghost" onClick={formatJsonBody} title={t('格式化 JSON', 'Format JSON')}>
+                    <IconWand size={12} />
+                    {t('格式化', 'Format')}
+                  </button>
+                  {!jsonCheck.ok && (
+                    <span className="pill pill-warning" title={jsonCheck.message}>{t('JSON 语法有误', 'Invalid JSON')}</span>
+                  )}
+                </div>
               )}
             </div>
 

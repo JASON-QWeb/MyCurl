@@ -42,6 +42,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     selectRequest,
     selectFolder,
     toggleFolder,
+    setAllFoldersExpanded,
     createFolder,
     updateFolder,
     moveFolder,
@@ -108,6 +109,8 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
     : null, [data, wsId, sidebarFilter]);
   const visibleFolders = matches ? folders.filter(f => matches.folderIds.has(f.id)) : folders;
   const visibleRequests = matches ? requests.filter(r => matches.requestIds.has(r.id)) : requests;
+  const anyExpanded = folders.some(folder => expandedFolders[folder.id]);
+  const counts = t(`${folders.length} 目录 · ${requests.length} 请求`, `${folders.length} folders · ${requests.length} requests`);
 
   const handleDeleteFolder = async (f: Folder) => {
     const ok = await confirm({
@@ -457,10 +460,20 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
         )}
       </div>
 
-      <div className="sidebar-footer">
-        <span>
-          {t(`${folders.length} 目录 · ${requests.length} 请求`, `${folders.length} folders · ${requests.length} requests`)}
-        </span>
+      <div className="sidebar-footer" style={{ gap: 4, whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+          <span title={counts} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{counts}</span>
+          {folders.length > 0 && !matches && (
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ height: 'auto', padding: '0 2px', fontSize: 'inherit' }}
+              title={anyExpanded ? t('折叠所有文件夹', 'Collapse all folders') : t('展开所有文件夹', 'Expand all folders')}
+              onClick={() => setAllFoldersExpanded(wsId, !anyExpanded)}
+            >
+              {anyExpanded ? t('折叠', 'Collapse') : t('展开', 'Expand')}
+            </button>
+          )}
+        </div>
         <span title={serverInfo?.dataDir || t('本地存储', 'Local Storage')}>
           {serverInfo?.runtime === 'rust-tauri'
             ? t('Rust 内核 ✓', 'Rust Core ✓')

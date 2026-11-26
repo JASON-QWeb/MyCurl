@@ -27,6 +27,22 @@ const FORBIDDEN_HEADERS: &[&str] = &[
     "host",
 ];
 
+const REDIRECT_CREDENTIAL_HEADERS: &[&str] = &[
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "x-api-key",
+    "api-key",
+    "apikey",
+    "x-auth-token",
+    "x-auth-key",
+    "x-goog-api-key",
+    "ocp-apim-subscription-key",
+    "private-token",
+    "x-access-token",
+    "access-token",
+];
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendPayload {
@@ -231,6 +247,12 @@ fn build_client(opts: &RequestOptionsPayload) -> Result<Client, String> {
 
 fn has_header(headers: &[(String, String)], name: &str) -> bool {
     headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
 }
 
 fn build_header_map(pairs: &[(String, String)]) -> Result<HeaderMap, String> {
@@ -439,12 +461,11 @@ where
                         body = PreparedBody::None;
                         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-type"));
                     }
-                    if next_url.host_str() != current_url.host_str()
-                        || next_url.port_or_known_default() != current_url.port_or_known_default()
-                    {
+                    if !same_origin(&current_url, &next_url) {
                         headers.retain(|(k, _)| {
-                            !k.eq_ignore_ascii_case("authorization")
-                                && !k.eq_ignore_ascii_case("cookie")
+                            !REDIRECT_CREDENTIAL_HEADERS
+                                .iter()
+                                .any(|name| k.eq_ignore_ascii_case(name))
                         });
                     }
                     current_url = next_url;
@@ -513,8 +534,112 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn redirect_origin_checks_scheme_host_and_effective_port() {
+        let origin = Url::parse("http://localhost").unwrap();
+        assert!(same_origin(
+            &origin,
+            &Url::parse("http://localhost:80/next").unwrap()
+        ));
+        for url in [
+            "https://localhost:80",
+            "http://127.0.0.1:80",
+            "http://localhost:81",
+        ] {
+            assert!(!same_origin(&origin, &Url::parse(url).unwrap()));
+        }
+    }
+
+    async fn capture_headers(
+        listener: &TcpListener,
+        location: Option<&str>,
+    ) -> HashMap<String, String> {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let mut headers = HashMap::new();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.to_ascii_lowercase(), value.trim().to_owned());
+            }
+        }
+        let status = match location {
+            Some(url) => format!("302 Found\r\nLocation: {url}"),
+            None => "200 OK".to_owned(),
+        };
+        let response =
+            format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        stream.write_all(response.as_bytes()).await.unwrap();
+        headers
+    }
+
+    #[tokio::test]
+    async fn cross_origin_redirect_strips_credentials_and_preserves_trace_header() {
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let start = format!("http://{}/start", origin.local_addr().unwrap());
+        let target = format!("http://{}/final", destination.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let first = capture_headers(&origin, Some("/same-origin")).await;
+            let second = capture_headers(&origin, Some(&target)).await;
+            let last = capture_headers(&destination, None).await;
+            [first, second, last]
+        });
+        let credentials = [
+            "Authorization",
+            "Proxy-Authorization",
+            "Cookie",
+            "X-aPi-KeY",
+            "API-Key",
+            "ApiKey",
+            "X-Auth-Token",
+            "X-Auth-Key",
+            "X-Goog-Api-Key",
+            "Ocp-Apim-Subscription-Key",
+            "Private-Token",
+            "X-Access-Token",
+            "Access-Token",
+        ];
+        let mut headers: Vec<_> = credentials
+            .iter()
+            .map(|name| (name.to_string(), "test-value".to_owned()))
+            .collect();
+        headers.push(("X-Trace-Id".to_owned(), "redirect-trace".to_owned()));
+        let payload = SendPayload {
+            request_id: None,
+            method: "GET".to_owned(),
+            url: start,
+            headers,
+            body: RequestBodyPayload::None,
+            options: RequestOptionsPayload {
+                timeout_ms: 3000,
+                ..Default::default()
+            },
+        };
+        let (_tx, rx) = oneshot::channel();
+        let mut status = None;
+        execute(payload, rx, |event| match event {
+            StreamEvent::Head { status: code, .. } => status = Some(code),
+            StreamEvent::Error { message, .. } => panic!("request failed: {message}"),
+            _ => {}
+        })
+        .await;
+        assert_eq!(status, Some(200));
+        let received = server.await.unwrap();
+        for name in credentials.map(str::to_ascii_lowercase) {
+            assert_eq!(received[0][&name], "test-value");
+            assert_eq!(received[1][&name], "test-value");
+            assert!(!received[2].contains_key(&name), "{name}");
+        }
+        for headers in received {
+            assert_eq!(headers["x-trace-id"], "redirect-trace");
+        }
+    }
 
     #[tokio::test]
     async fn test_execute_post_json_against_local_server() {

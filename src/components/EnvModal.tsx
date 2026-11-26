@@ -13,7 +13,8 @@ export const EnvModal: React.FC = () => {
     envModal,
     setEnvModal,
     createEnvironment,
-    importPostmanEnvironment,
+    importEnvironmentFile,
+    duplicateEnvironment,
     updateEnvironment,
     deleteEnvironment,
     selectFolder,
@@ -26,6 +27,7 @@ export const EnvModal: React.FC = () => {
   const baseEnv = envs.find((e) => e.isBase) ?? envs[0];
   const [selectedId, setSelectedId] = useState<string>('__vault__');
   const [newName, setNewName] = useState('');
+  const [secretFilter, setSecretFilter] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
@@ -72,14 +74,18 @@ export const EnvModal: React.FC = () => {
   if (!envModal) return null;
 
   const activeEnv = envs.find((e) => e.id === selectedId) ?? (selectedId === '__vault__' ? null : baseEnv);
+  const query = secretFilter.trim().toLowerCase();
+  const visibleSecrets = query ? allSecrets.filter(secret =>
+    [secret.key, secret.scope, secret.note].some(field => field?.toLowerCase().includes(query))) : allSecrets;
+  const filterLabel = t('筛选密钥名或来源…', 'Filter secrets or scopes…');
 
   const importFile = async (file?: File) => {
     if (!file) return;
     try {
-      const env = importPostmanEnvironment(JSON.parse(await file.text()), wsId);
+      const env = importEnvironmentFile(await file.text(), wsId, file.name);
       if (env) setSelectedId(env.id);
     } catch {
-      toast(t('无法读取环境 JSON 文件', 'Could not read the environment JSON file'), 'error');
+      toast(t('无法读取环境文件', 'Could not read the environment file'), 'error');
     }
   };
 
@@ -145,6 +151,7 @@ export const EnvModal: React.FC = () => {
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <button
                     className={`menu-item ${activeEnv?.id === e.id ? 'active' : ''}`}
+                    style={{ flex: 1, minWidth: 0 }}
                     onClick={() => setSelectedId(e.id)}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}>
@@ -154,16 +161,28 @@ export const EnvModal: React.FC = () => {
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.variables.length}</span>
                   </button>
                   {!e.isBase && (
-                    <button
-                      className="btn btn-ghost btn-icon btn-sm"
-                      onClick={() => {
-                        deleteEnvironment(e.id);
-                        if (selectedId === e.id) setSelectedId('__vault__');
-                      }}
-                      title={t('删除环境', 'Delete environment')}
-                    >
-                      <IconTrash size={12} />
-                    </button>
+                    <>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        title={t('复制环境', 'Duplicate environment')}
+                        onClick={() => {
+                          const copy = duplicateEnvironment(e.id);
+                          if (copy) setSelectedId(copy.id);
+                        }}
+                      >
+                        <IconCopy size={12} />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        onClick={() => {
+                          deleteEnvironment(e.id);
+                          if (selectedId === e.id) setSelectedId('__vault__');
+                        }}
+                        title={t('删除环境', 'Delete environment')}
+                      >
+                        <IconTrash size={12} />
+                      </button>
+                    </>
                   )}
                 </div>
               ))}
@@ -172,7 +191,7 @@ export const EnvModal: React.FC = () => {
             <input
               ref={fileInput}
               type="file"
-              accept=".json,application/json"
+              accept=".json,.env,.txt,application/json,text/plain"
               hidden
               onChange={e => {
                 const file = e.currentTarget.files?.[0];
@@ -228,6 +247,17 @@ export const EnvModal: React.FC = () => {
                     'All API keys and tokens extracted across folders and environments. Stored locally on your machine only.',
                   )}
                 </p>
+                {allSecrets.length > 0 && (
+                  <input
+                    type="search"
+                    className="input input-sm"
+                    style={{ width: '100%', marginBottom: 6 }}
+                    aria-label={filterLabel}
+                    placeholder={filterLabel}
+                    value={secretFilter}
+                    onChange={e => setSecretFilter(e.target.value)}
+                  />
+                )}
                 {allSecrets.length === 0 ? (
                   <div className="empty-state">
                     <IconKey size={24} />
@@ -238,6 +268,8 @@ export const EnvModal: React.FC = () => {
                       )}
                     </p>
                   </div>
+                ) : visibleSecrets.length === 0 ? (
+                  <p className="empty-state">{t('没有匹配的密钥', 'No matching secrets')}</p>
                 ) : (
                   <table className="kv-table">
                     <thead>
@@ -249,7 +281,7 @@ export const EnvModal: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {allSecrets.map((s) => {
+                      {visibleSecrets.map((s) => {
                         const show = !!revealed[s.id];
                         return (
                           <tr key={s.id}>
