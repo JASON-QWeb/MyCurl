@@ -89,25 +89,20 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
   }
 
   // 请求头：文件夹继承 -> 请求自身（同名覆盖）
-  const hdrList: [string, string][] = [];
-  const upsertHeader = (k: string, v: string, override = true) => {
-    const lower = k.toLowerCase();
-    if (override) {
-      for (let i = hdrList.length - 1; i >= 0; i--) {
-        if (hdrList[i][0].toLowerCase() === lower) hdrList.splice(i, 1);
-      }
-    }
-    hdrList.push([k, v]);
-  };
+  const localHeaders = req.headers
+    .filter((h) => h.enabled && h.key.trim())
+    .map((h): [string, string] => [r(h.key.trim()), r(h.value)]);
+  const localNames = new Set(localHeaders.map(([key]) => key.toLowerCase()));
+  const inherited = new Map<string, [string, string]>();
+  for (const h of resolveInheritedHeaders(data, req.folderId)) {
+    const key = r(h.key.trim());
+    if (!localNames.has(key.toLowerCase())) inherited.set(key.toLowerCase(), [key, h.value]);
+  }
+  const hdrList: [string, string][] = [
+    ...Array.from(inherited.values(), ([key, value]): [string, string] => [key, r(value)]),
+    ...localHeaders,
+  ];
   const hasHeader = (k: string) => hdrList.some(([hk]) => hk.toLowerCase() === k.toLowerCase());
-
-  for (const ih of resolveInheritedHeaders(data, req.folderId)) {
-    upsertHeader(r(ih.key), r(ih.value), true);
-  }
-  for (const h of req.headers) {
-    if (!h.enabled || !h.key.trim()) continue;
-    upsertHeader(r(h.key.trim()), r(h.value), false);
-  }
 
   // 认证
   const { auth } = resolveEffectiveAuth(data, req);
@@ -115,13 +110,13 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
     const token = r(auth.token ?? '');
     const prefix = r(auth.prefix ?? 'Bearer').trim();
     if (token && !hasHeader('authorization')) {
-      upsertHeader('Authorization', prefix ? `${prefix} ${token}` : token);
+      hdrList.push(['Authorization', prefix ? `${prefix} ${token}` : token]);
     }
   } else if (auth.type === 'basic') {
     const u = r(auth.username ?? '');
     const p = r(auth.password ?? '');
     if ((u || p) && !hasHeader('authorization')) {
-      upsertHeader('Authorization', `Basic ${encodeBasic(u, p)}`);
+      hdrList.push(['Authorization', `Basic ${encodeBasic(u, p)}`]);
     }
   } else if (auth.type === 'apikey') {
     const k = r(auth.key ?? '').trim();
@@ -132,7 +127,7 @@ export function prepareRequest(data: AppData, req: HttpRequest, varsOverride?: V
         const pair = `${encodeURIComponent(k)}=${encodeURIComponent(v)}`;
         url = `${base}?${query ? `${query}&${pair}` : pair}${hash}`;
       } else if (!hasHeader(k)) {
-        upsertHeader(k, v);
+        hdrList.push([k, v]);
       }
     }
   }
