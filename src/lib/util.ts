@@ -1,4 +1,4 @@
-import type { Language } from './types';
+import type { Language, Settings } from './types';
 import { tr } from './translate';
 
 export function uid(prefix = ''): string {
@@ -106,6 +106,11 @@ export function methodShort(m: string) {
 
 export function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+export function isDarkTheme(theme: Settings['theme'], systemDark?: boolean) {
+  return theme === 'dark' || (theme === 'system' &&
+    (systemDark ?? globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false));
 }
 
 export function downloadJsonFile(content: string, filename: string) {

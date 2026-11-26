@@ -221,6 +221,7 @@ export const RequestPane: React.FC<{ req: HttpRequest; dark: boolean }> = ({ req
             ))}
           </select>
           <TemplateInput
+            data-url-input="true"
             value={req.url}
             onChange={handleUrlChange}
             vars={vars}

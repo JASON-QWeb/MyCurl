@@ -88,17 +88,23 @@ Built with Tauri v2 and a Rust HTTP core. No account required. All workspaces, s
 - [x] **Clipboard cURL detection**: Copy one or more `curl` commands and switch back to the app for a one-click import prompt in the top bar.
 - [x] **Auth secret picker**: Pick existing secret variables from a dropdown in request and folder Auth tabs.
 - [x] **Workspace & environment switchers**: Switch projects or dev/prod environments from the top bar.
+- [x] **Search commands in English or Chinese** with `⌘K`. Send the active request, copy its cURL, export code or docs, or duplicate it. You can also switch environments, workspaces, themes, and layouts.
+- [x] **Run a folder’s requests in order** with **Run All**. See each status and duration as it arrives, then check how many passed or failed. Stop at any time or open a completed request to inspect its response.
+- [x] **The folder’s `···` menu** now holds subfolder creation, masked Postman export, and deletion. Expand **Keyboard Shortcuts** at the bottom of Settings for the full shortcut list.
 
 ---
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
+| Shortcut (⌘ or Ctrl) | Action |
 | :---: | :--- |
-| `⌘I` or `⌘V` | Paste `curl` and open smart import preview (`⌘V` works anywhere outside text inputs) |
-| `⌘K` | Search requests, folders, or commands |
+| `⌘I` / `⌘⇧V` / `⌘V` | Open cURL import, or paste with `⌘V` outside an editor |
+| `⌘K` | Search requests, folders, or commands, and switch environments or workspaces |
 | `⌘↵` | Send current request |
 | `⌘N` | Create a new blank request |
+| `⌘L` | Focus and select the active request URL |
+| `⌘D` | Duplicate the active request when focus is outside an editor |
+| `⌘S` | Save locally now |
 
 ---
 

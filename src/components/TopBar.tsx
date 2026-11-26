@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useI18n } from '../lib/i18n';
+import { isDarkTheme } from '../lib/util';
 import {
   IconCheck,
   IconChevronDown,
@@ -36,7 +37,8 @@ export const TopBar: React.FC = () => {
     setSettingsModal,
     setCommandPalette,
     setDocModal,
-    updateSettings,
+    toggleTheme,
+    toggleLayout,
     confirm,
     prompt,
   } = useAppStore();
@@ -68,17 +70,7 @@ export const TopBar: React.FC = () => {
   const activeEnvId = data.settings.activeEnvironment[wsId] ?? null;
   const activeEnv = subEnvs.find((e) => e.id === activeEnvId) ?? null;
 
-  const isDark =
-    data.settings.theme === 'dark' ||
-    (data.settings.theme === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-
-  const toggleTheme = () => {
-    updateSettings({ theme: isDark ? 'light' : 'dark' });
-  };
-
-  const toggleLayout = () => {
-    updateSettings({ layout: data.settings.layout === 'horizontal' ? 'vertical' : 'horizontal' });
-  };
+  const isDark = isDarkTheme(data.settings.theme);
 
   return (
     <header className="topbar" data-tauri-drag-region>

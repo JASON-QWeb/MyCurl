@@ -129,3 +129,47 @@ it('keeps the latest response selected when a superseded send finishes later', a
   expect(state.activeResponseId[req.id]).toBe(state.histories[req.id][0].id);
   expect(saved).toHaveBeenCalledOnce();
 });
+
+it('keeps the returned response active when an earlier navigation finishes reading stale history', async () => {
+  const data = seedData();
+  const req = data.requests[0];
+  let finishRead!: () => void;
+  vi.spyOn(storage, 'loadHistory').mockImplementationOnce(() => new Promise(resolve => { finishRead = () => resolve([]); }))
+    .mockResolvedValue([]);
+  vi.spyOn(storage, 'saveHistoryItem').mockResolvedValue();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"t":"head","status":202}\n{"t":"end"}\n')));
+  useAppStore.setState({ data });
+  const { selectRequest, sendRequest } = useAppStore.getState();
+  selectRequest(req.id);
+  const result = await sendRequest(req.id);
+  expect(result?.status).toBe(202);
+  finishRead();
+  await Promise.resolve();
+  expect(useAppStore.getState().histories[req.id]).toEqual([result]);
+  expect(useAppStore.getState().activeResponseId[req.id]).toBe(result?.id);
+});
+
+it('does not recreate history for a folder deleted while a cold response is being recorded', async () => {
+  const data = seedData();
+  const req = data.requests[0];
+  let finishRead!: () => void;
+  let startedRead!: () => void;
+  const reading = new Promise<void>(resolve => { startedRead = resolve; });
+  vi.spyOn(storage, 'loadHistory').mockImplementation(() => new Promise(resolve => {
+    finishRead = () => resolve([]);
+    startedRead();
+  }));
+  vi.spyOn(storage, 'saveHistoryItem').mockResolvedValue();
+  vi.spyOn(storage, 'deleteHistoryItem').mockResolvedValue();
+  vi.spyOn(storage, 'saveAppData').mockResolvedValue();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"t":"head","status":200}\n{"t":"end"}\n')));
+  useAppStore.setState({ data });
+  const pending = useAppStore.getState().sendRequest(req.id);
+  await reading;
+  useAppStore.getState().deleteFolder(req.folderId!);
+  finishRead();
+  expect(await pending).toBeUndefined();
+  expect(useAppStore.getState().inFlight[req.id]).toBeUndefined();
+  expect(useAppStore.getState().histories[req.id]).toBeUndefined();
+  expect(storage.saveHistoryItem).not.toHaveBeenCalled();
+});

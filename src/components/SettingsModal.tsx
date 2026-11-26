@@ -20,6 +20,30 @@ import { downloadJsonFile } from '../lib/util';
 import type { AppData, CurlCopySecretMode } from '../lib/types';
 import { IconDownload, IconSettings, IconUpload, IconX } from './Icons';
 
+function KeyboardShortcuts() {
+  const { t } = useI18n();
+  const rows = [
+    ['⌘I / ⌘V / ⌘⇧V', t('打开 cURL 归档，⌘V 可在输入框外直接粘贴', 'Open cURL import, or paste with ⌘V outside an editor')],
+    ['⌘K', t('搜索请求、文件夹或命令', 'Search requests, folders, or commands')],
+    ['⌘↵', t('发送当前请求', 'Send the active request')],
+    ['⌘N', t('新建空白请求', 'Create a blank request')],
+    ['⌘L', t('选中当前请求的 URL', 'Select the active request URL')],
+    ['⌘D', t('在编辑区外复制当前请求副本', 'Duplicate the active request outside an editor')],
+    ['⌘S', t('立即保存到本地', 'Save locally now')],
+  ];
+  return (
+    <details style={{ marginTop: 12, fontSize: 12, color: 'var(--text-dim)' }}>
+      <summary style={{ cursor: 'pointer' }}>{t('快捷键速查', 'Keyboard Shortcuts')}</summary>
+      <table className="md-table" style={{ marginTop: 8 }}>
+        <thead><tr><th scope="col">{t('快捷键（⌘ 或 Ctrl）', 'Shortcut (⌘ or Ctrl)')}</th><th scope="col">{t('功能', 'Action')}</th></tr></thead>
+        <tbody>{rows.map(([keys, action]) => (
+          <tr key={keys}><td><kbd className="kbd">{keys}</kbd></td><td>{action}</td></tr>
+        ))}</tbody>
+      </table>
+    </details>
+  );
+}
+
 export const SettingsModal: React.FC = () => {
   const {
     data,
@@ -340,6 +364,7 @@ export const SettingsModal: React.FC = () => {
                 'Supports OpenAPI, Postman, Apifox, HAR, .http, MyCurl Backup, cURL')}
             </small>
           </div>
+          <KeyboardShortcuts />
         </div>
 
         <div className="modal-foot">

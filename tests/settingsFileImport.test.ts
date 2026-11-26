@@ -166,8 +166,10 @@ function exportData(language: Language) {
 it.each(['en', 'zh'] as const)('exports a masked workspace from Settings and displays a single supported-formats hint in %s', async lang => {
   const captured = trackDownload();
   const { data } = exportData(lang);
-  const { container } = settings(lang, data);
-  expect(container.querySelector('.card:last-child small')?.textContent).toBe(lang === 'en'
+  const { container, input } = settings(lang, data);
+  const hints = input.closest('.card')!.querySelectorAll('small');
+  expect(hints).toHaveLength(1);
+  expect(hints[0].textContent).toBe(lang === 'en'
     ? 'Supports OpenAPI, Postman, Apifox, HAR, .http, MyCurl Backup, cURL' : '支持 OpenAPI · Postman · Apifox · HAR · .http · MyCurl 备份 · cURL');
   await click(button(container, lang === 'en' ? 'Export Postman (Masked)' : '导出 Postman 集合（脱敏）'));
   const file = await captured();

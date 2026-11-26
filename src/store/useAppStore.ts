@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import type { AppData, Environment, Folder, HttpRequest, ResponseRecord, Settings, Workspace } from '../lib/types';
 import { newEnvironment, newFolder, newRequest, newWorkspace, normalizeData, seedData } from '../lib/factory';
-import { deleteHistoryItem, fetchServerInfo, loadAppData, loadHistory, saveAppData, saveHistoryItem, type ServerInfo } from '../lib/storage';
+import { deleteHistoryItem, fetchServerInfo, loadAppData, loadHistory, saveHistoryItem, type ServerInfo } from '../lib/storage';
+import { flushSave, scheduleSave } from './saveQueue';
 import { executeRequest } from '../lib/requestRunner';
 import { applyImport, importAll, planImport, type ImportOptions, type ImportPlan } from '../lib/curlImport';
 import { parseCurlCommands, type ParsedCurl } from '../lib/curlParser';
 import { SECRET_NAME_RE } from '../lib/template';
-import { kv, uid } from '../lib/util';
+import { isDarkTheme, kv, uid } from '../lib/util';
 import { tr } from '../lib/translate';
 import { readPostmanEnvironment } from '../lib/postmanEnvironment';
 import type { SaveTargetScope } from '../lib/responseExtract';
@@ -70,6 +71,7 @@ interface AppStore {
 
   // 初始化与持久化
   init: () => Promise<void>;
+  flushSaveNow: () => Promise<boolean>;
   mutate: (fn: (draft: AppData) => AppData, immediate?: boolean) => void;
   replaceData: (next: AppData) => void;
 
@@ -109,6 +111,8 @@ interface AppStore {
 
   // 设置
   updateSettings: (patch: Partial<Settings>) => void;
+  toggleTheme: () => void;
+  toggleLayout: () => void;
   updateImportSettings: (patch: Partial<Settings['import']>) => void;
 
   // 导入 cURL
@@ -117,7 +121,7 @@ interface AppStore {
   applyBatchImport: (parsed: ParsedCurl[], opts?: Partial<ImportOptions>, autoSend?: boolean) => { count: number; lastRequestId: string | null };
 
   // 发送与历史
-  sendRequest: (requestId: string) => Promise<void>;
+  sendRequest: (requestId: string) => Promise<ResponseRecord | undefined>;
   cancelRequest: (requestId: string) => void;
   selectResponse: (requestId: string, responseId: string) => void;
   deleteResponseHistory: (requestId: string, responseId?: string) => Promise<void>;
@@ -139,33 +143,7 @@ interface AppStore {
   removeToast: (id: string) => void;
 }
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingSaveData: AppData | null = null;
 let dialogResolver: ((result: boolean | string | null) => void) | null = null;
-
-function flushSave(set: (partial: Partial<AppStore>) => void) {
-  if (!pendingSaveData) return;
-  const toSave = pendingSaveData;
-  pendingSaveData = null;
-  set({ saving: true, saveError: null });
-  saveAppData(toSave)
-    .then(() => set({ saving: false }))
-    .catch((err) => set({ saving: false, saveError: (err as Error).message }));
-}
-
-function scheduleSave(next: AppData, set: (partial: Partial<AppStore>) => void, immediate = false) {
-  pendingSaveData = next;
-  if (saveTimer) clearTimeout(saveTimer);
-  if (immediate) {
-    saveTimer = null;
-    flushSave(set);
-  } else {
-    saveTimer = setTimeout(() => {
-      saveTimer = null;
-      flushSave(set);
-    }, 320);
-  }
-}
 
 function activeWsId(data: AppData): string {
   return data.settings.activeWorkspaceId || data.workspaces[0].id;
@@ -217,13 +195,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (firstReq) {
       const items = await loadHistory(firstReq.id);
       if (items.length) {
-        set((s) => ({
+        set((s) => s.histories[firstReq.id] ? s : ({
           histories: { ...s.histories, [firstReq.id]: items },
           activeResponseId: { ...s.activeResponseId, [firstReq.id]: items[0].id },
         }));
       }
     }
   },
+
+  flushSaveNow: () => flushSave(get().data, set),
 
   mutate: (fn, immediate = false) => {
     const next = fn(get().data);
@@ -261,7 +241,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     if (!histories[id]) {
       loadHistory(id).then((items) => {
-        set((s) => ({
+        set((s) => s.histories[id] ? s : ({
           histories: { ...s.histories, [id]: items },
           activeResponseId: { ...s.activeResponseId, [id]: s.activeResponseId[id] ?? items[0]?.id ?? null },
         }));
@@ -575,6 +555,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().mutate((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
   },
 
+  toggleTheme: () => get().updateSettings({ theme: isDarkTheme(get().data.settings.theme) ? 'light' : 'dark' }),
+  toggleLayout: () => get().updateSettings({ layout: get().data.settings.layout === 'horizontal' ? 'vertical' : 'horizontal' }),
+
   updateImportSettings: (patch) => {
     get().mutate((d) => ({
       ...d,
@@ -685,7 +668,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       inFlight: { ...s.inFlight, [requestId]: { controller, startedAt, partial: initial } },
     }));
 
-    const result = await executeRequest(data, req, controller.signal, {
+    const result: ResponseRecord = await executeRequest(data, req, controller.signal, {
       onUpdate: (partial) => {
         set((s) => {
           const cur = s.inFlight[requestId];
@@ -693,13 +676,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
           return { inFlight: { ...s.inFlight, [requestId]: { ...cur, partial } } };
         });
       },
-    });
+    }).catch((error: unknown) => ({
+      ...initial, timeMs: Date.now() - startedAt,
+      error: tr(data.settings.language, `请求失败：${String(error)}`, `Request failed: ${String(error)}`),
+    }));
 
     if (get().inFlight[requestId]?.controller !== controller) return;
+    // Folder runs may send a request before its history has ever been opened.
+    const previous = get().histories[requestId] ?? await loadHistory(requestId);
+    if (get().inFlight[requestId]?.controller !== controller) return;
+    const stillExists = get().data.requests.some(r => r.id === requestId);
     set((s) => {
       const nextInFlight = { ...s.inFlight };
       delete nextInFlight[requestId];
-      const prevHist = s.histories[requestId] ?? [];
+      if (!stillExists) return { inFlight: nextInFlight };
+      const prevHist = s.histories[requestId] ?? previous;
       const nextHist = [result, ...prevHist.filter((x) => x.id !== result.id)].slice(0, 30);
       return {
         inFlight: nextInFlight,
@@ -708,9 +699,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       };
     });
 
+    if (!stillExists) return;
     if (!result.cancelled) {
       saveHistoryItem(requestId, result);
     }
+    return result;
   },
 
   cancelRequest: (requestId) => {

@@ -21,6 +21,7 @@ interface TemplateInputProps {
   onEnter?: () => void;
   onPasteCurl?: (text: string) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  'data-url-input'?: 'true';
   /** 在输入框右侧展示下拉选择按钮，支持一键从当前作用域密钥/变量中选择并替换值 */
   showVarPicker?: boolean;
   /** 下拉按钮文案，默认“选择” */
@@ -85,6 +86,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
   onEnter,
   onPasteCurl,
   inputRef,
+  'data-url-input': urlInput,
   showVarPicker = false,
   varPickerLabel,
   varPickerActions,
@@ -238,6 +240,7 @@ export const TemplateInput: React.FC<TemplateInputProps> = ({
         </div>
         <input
           ref={elRef as React.RefObject<HTMLInputElement>}
+          data-url-input={urlInput}
           type="text"
           className="tpl-input"
           value={value}

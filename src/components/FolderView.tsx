@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Auth, Folder, Variable } from '../lib/types';
 import { resolveVariables } from '../lib/template';
-import { copyText, maskSecret, methodColor, methodShort, uid } from '../lib/util';
+import { copyText, maskSecret, uid } from '../lib/util';
 import { useI18n } from '../lib/i18n';
+import { downloadPostmanCollection } from '../lib/postmanExport';
+import { FolderRequests, useFolderRun } from './FolderRequests';
+import { MoreActions } from './MoreActions';
 import { KeyValueTable } from './KeyValueTable';
 import { TemplateInput } from './TemplateInput';
 import { MarkdownView } from './MarkdownView';
@@ -20,12 +23,13 @@ import {
 } from './Icons';
 
 export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
-  const { data, selection, createFolder, updateFolder, deleteFolder, createRequest, selectFolder, selectRequest, setDocModal, setEnvModal, confirm, toast } = useAppStore();
+  const { data, selection, createFolder, updateFolder, deleteFolder, createRequest, selectFolder, setDocModal, setEnvModal, confirm, toast } = useAppStore();
   const { lang, t } = useI18n();
   const initialTab = selection?.kind === 'folder' && selection.id === folder.id && selection.tab ? selection.tab : 'overview';
   const [tab, setTab] = useState<'overview' | 'vars' | 'auth' | 'headers'>(initialTab);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [editingDoc, setEditingDoc] = useState(false);
+  const run = useFolderRun(folder.id);
 
   useEffect(() => {
     if (selection?.kind === 'folder' && selection.id === folder.id && selection.tab) {
@@ -111,11 +115,23 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            className="btn btn-ghost"
-            style={{ color: 'var(--danger)' }}
-            title={t('删除文件夹', 'Delete folder')}
-            onClick={async () => {
+          <button className="btn" onClick={() => setDocModal({ scope: 'folder', folderId: folder.id })}>
+            <IconDoc size={14} />
+            {t('导出 Markdown', 'Export Markdown')}
+          </button>
+          <button className="btn btn-primary" onClick={() => createRequest(folder.id)}>
+            <IconPlus size={14} />
+            {t('新建请求', 'New Request')}
+          </button>
+          <MoreActions key={folder.id} label={t('更多文件夹操作', 'More folder actions')}>
+            <button className="menu-item" onClick={() => createFolder(folder.id, t('子文件夹', 'Subfolder'))}>
+              {t('新建子文件夹', 'New Subfolder')}
+            </button>
+            <button className="menu-item" onClick={() => downloadPostmanCollection(data, folder.workspaceId, folder.id)}>
+              {t('导出 Postman 集合（脱敏）', 'Export Postman Collection (Masked)')}
+            </button>
+            <div className="menu-sep" />
+            <button className="menu-item danger" onClick={async () => {
               const ok = await confirm({
                 title: t('删除文件夹', 'Delete Folder'),
                 message: t(
@@ -126,23 +142,8 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
                 danger: true,
               });
               if (ok) deleteFolder(folder.id);
-            }}
-          >
-            <IconTrash size={14} />
-            {t('删除', 'Delete')}
-          </button>
-          <button className="btn" onClick={() => setDocModal({ scope: 'folder', folderId: folder.id })}>
-            <IconDoc size={14} />
-            {t('导出 Markdown 文档', 'Export Markdown')}
-          </button>
-          <button className="btn" onClick={() => createFolder(folder.id, t('子文件夹', 'Subfolder'))}>
-            <IconFolder size={14} />
-            {t('新建子文件夹', 'New Subfolder')}
-          </button>
-          <button className="btn btn-primary" onClick={() => createRequest(folder.id)}>
-            <IconPlus size={14} />
-            {t('新建请求', 'New Request')}
-          </button>
+            }}>{t('删除文件夹', 'Delete Folder')}</button>
+          </MoreActions>
         </div>
       </div>
 
@@ -284,34 +285,7 @@ export const FolderView: React.FC<{ folder: Folder }> = ({ folder }) => {
             )}
 
             {/* 接口一览 */}
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">
-                <span>{t(`已归档接口（${childRequests.length}）`, `Requests (${childRequests.length})`)}</span>
-              </div>
-              {childRequests.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('此目录还没有接口', 'No requests in this folder yet')}</div>
-              ) : (
-                <div className="route-list">
-                  {childRequests.map((r) => (
-                    <div key={r.id} className="route-item" onClick={() => selectRequest(r.id)}>
-                      <span className="method-tag" style={{ color: methodColor(r.method) }}>
-                        {methodShort(r.method)}
-                      </span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: 500 }}>{r.name}</div>
-                        <div className="route-url">{r.url}</div>
-                      </div>
-                      {r.responseFilter && (
-                        <span className="pill pill-info mono" title={`jq: ${r.responseFilter}`}>
-                          jq
-                        </span>
-                      )}
-                      {r.body.type !== 'none' && <span className="pill">{r.body.type.toUpperCase()}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <FolderRequests requests={childRequests} run={run} />
 
             {/* 文件夹文档 */}
             <div className="card">

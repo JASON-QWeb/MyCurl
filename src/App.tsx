@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { looksLikeCurl } from './lib/curlParser';
 import { isMacOS, isTauri, readClipboardNative } from './lib/bridge';
-import { useI18n } from './lib/i18n';
-import { clamp } from './lib/util';
+import { tr, useI18n } from './lib/i18n';
+import { clamp, isDarkTheme } from './lib/util';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { RequestPane } from './components/RequestPane';
@@ -18,6 +18,56 @@ import { CommandPalette } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { IconPlus, IconSparkles } from './components/Icons';
 
+function onShortcut(e: KeyboardEvent) {
+  if (!e.metaKey && !e.ctrlKey) return;
+  const state = useAppStore.getState();
+  const key = e.key.toLowerCase();
+  if (key === 'k') {
+    e.preventDefault();
+    state.setCommandPalette(true);
+  } else if (key === 'i' || (e.shiftKey && key === 'v')) {
+    e.preventDefault();
+    state.openImportModal();
+  } else if (key === 'enter' && !state.importModal?.open && state.selection?.kind === 'request') {
+    e.preventDefault();
+    state.sendRequest(state.selection.id);
+  } else if (key === 'n' && !e.shiftKey && !document.activeElement?.matches('input, textarea')) {
+    e.preventDefault();
+    state.createRequest(null);
+  } else if (!e.altKey && !e.shiftKey) {
+    const lang = state.data.settings.language;
+    if (key === 's') {
+      e.preventDefault();
+      if (e.repeat || !state.loaded) return;
+      void state.flushSaveNow().then(saved => {
+        if (saved) state.toast(tr(lang, '已保存到本地', 'Saved locally'), 'success');
+        else state.toast(tr(lang, '本地保存失败', 'Could not save locally'), 'error');
+      });
+      return;
+    }
+    if (key !== 'l' && key !== 'd') return;
+    const { selection } = state;
+    const modalOpen = state.importModal?.open || state.envModal || state.settingsModal || state.commandPalette ||
+      state.exportModal || state.docModal || state.dialog;
+    if (modalOpen || selection?.kind !== 'request') return;
+    if (key === 'l') {
+      const url = document.querySelector<HTMLInputElement>('input[data-url-input="true"]');
+      if (url) {
+        e.preventDefault();
+        url.focus();
+        url.select();
+      }
+    } else {
+      const editable = 'input, textarea, [contenteditable], .cm-editor';
+      if (document.activeElement?.closest(editable) || (e.target instanceof Element && e.target.closest(editable))) return;
+      e.preventDefault();
+      if (!e.repeat && state.duplicateRequest(selection.id)) {
+        state.toast(tr(lang, '已复制请求副本', 'Duplicated request'), 'success');
+      }
+    }
+  }
+}
+
 export const App: React.FC = () => {
   const {
     data,
@@ -26,9 +76,7 @@ export const App: React.FC = () => {
     toasts,
     init,
     createRequest,
-    sendRequest,
     openImportModal,
-    setCommandPalette,
     setClipboardCurl,
     updateSettings,
     removeToast,
@@ -67,7 +115,7 @@ export const App: React.FC = () => {
     return () => mq.removeEventListener('change', onChange);
   }, []);
   const { lang, t } = useI18n();
-  const isDark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && sysDark);
+  const isDark = isDarkTheme(data.settings.theme, sysDark);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     document.documentElement.setAttribute('lang', lang === 'en' ? 'en' : 'zh-CN');
@@ -78,35 +126,6 @@ export const App: React.FC = () => {
 
   // 全局快捷键 + 非输入框粘贴 cURL 自动触发归档
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setCommandPalette(true);
-        return;
-      }
-      if (mod && (e.key.toLowerCase() === 'i' || (e.shiftKey && e.key.toLowerCase() === 'v'))) {
-        e.preventDefault();
-        openImportModal();
-        return;
-      }
-      if (mod && e.key === 'Enter') {
-        const state = useAppStore.getState();
-        if (!state.importModal?.open && state.selection?.kind === 'request') {
-          e.preventDefault();
-          sendRequest(state.selection.id);
-        }
-        return;
-      }
-      if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) {
-        const el = document.activeElement;
-        if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
-          e.preventDefault();
-          createRequest(null);
-        }
-      }
-    };
-
     const onPaste = (e: ClipboardEvent) => {
       const state = useAppStore.getState();
       if (state.importModal?.open) return;
@@ -126,15 +145,15 @@ export const App: React.FC = () => {
       if (text && looksLikeCurl(text)) setClipboardCurl(text);
     };
 
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onShortcut);
     window.addEventListener('paste', onPaste);
     window.addEventListener('focus', checkClipboard);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onShortcut);
       window.removeEventListener('paste', onPaste);
       window.removeEventListener('focus', checkClipboard);
     };
-  }, [createRequest, openImportModal, sendRequest, setClipboardCurl, setCommandPalette]);
+  }, [setClipboardCurl]);
 
   const isVert = data.settings.layout === 'vertical' || narrowWindow;
 
