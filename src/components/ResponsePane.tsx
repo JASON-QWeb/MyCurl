@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { HttpRequest, ResponseRecord } from '../lib/types';
 import { applyFilterToText } from '../lib/jq';
-import { isSseContent, parseSse } from '../lib/sse';
+import { parseResponseStream } from '../lib/responseStream';
 import { prettyJson } from '../lib/curlParser';
 import { copyText, formatBytes, formatMs, maskSecret, relativeTime } from '../lib/util';
 import { useI18n } from '../lib/i18n';
@@ -70,16 +70,19 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     ? running.partial
     : history.find((h) => h.id === activeId) ?? history[0] ?? null;
 
-  const isSse = useMemo(() => (resp ? isSseContent(resp.contentType, resp.body) : false), [resp]);
-  const parsedSse = useMemo(() => (isSse && resp ? parseSse(resp.body) : null), [isSse, resp]);
+  const receiving = !!running;
+  const stream = useMemo(
+    () => resp ? parseResponseStream(resp.contentType, resp.body, receiving) : null,
+    [resp, receiving],
+  );
   const isImage = useMemo(() => !!(resp?.bodyBase64 && /^image\//i.test(resp.contentType)), [resp]);
   const isHtml = useMemo(() => !!(resp && /text\/html/i.test(resp.contentType)), [resp]);
 
   const filterExpr = req.responseFilter ?? '';
   const filterResult = useMemo(() => {
-    if (!resp || !resp.body || !filterExpr.trim() || !filterEnabled || isSse) return null;
+    if (!resp || !resp.body || !filterExpr.trim() || !filterEnabled || stream) return null;
     return applyFilterToText(filterExpr.trim(), resp.body);
-  }, [resp, filterExpr, filterEnabled, isSse]);
+  }, [resp, filterExpr, filterEnabled, stream]);
 
   const displayedBody = useMemo(() => {
     if (!resp) return '';
@@ -104,10 +107,10 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     if (!resp) return;
     const blob = resp.bodyBase64
       ? new Blob([Uint8Array.from(atob(resp.bodyBase64), (c) => c.charCodeAt(0))], { type: resp.contentType || 'application/octet-stream' })
-      : new Blob([displayedBody], { type: 'text/plain;charset=utf-8' });
+      : new Blob([stream?.format === 'NDJSON' ? resp.body : displayedBody], { type: 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    const ext = resp.contentType.includes('json') ? 'json' : resp.contentType.includes('html') ? 'html' : 'txt';
+    const ext = stream?.format === 'NDJSON' ? 'ndjson' : resp.contentType.includes('json') ? 'json' : resp.contentType.includes('html') ? 'html' : 'txt';
     a.download = `${req.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}.${ext}`;
     a.click();
     URL.revokeObjectURL(a.href);
@@ -151,7 +154,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   {t(`${resp.redirects.length} 次重定向`, `${resp.redirects.length} redirect(s)`)}
                 </span>
               )}
-              {isSse && <span className="pill pill-accent">{t('SSE 流式', 'SSE Stream')}</span>}
+              {stream && <span className="pill pill-accent">{t(`${stream.format} 流式`, `${stream.format} Stream`)}</span>}
             </>
           )}
           {resp?.error && <span className="status-pill status-err">{t('请求异常', 'Request Error')}</span>}
@@ -165,7 +168,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 className="btn btn-ghost btn-icon btn-sm"
                 title={t('复制当前显示内容', 'Copy response')}
                 onClick={() => {
-                  copyText(isSse && parsedSse?.assembledText ? parsedSse.assembledText : displayedBody);
+                  copyText(stream?.assembledText && (stream.format === 'SSE' || bodyMode === 'pretty') ? stream.assembledText : displayedBody);
                   toast(t('已复制响应内容', 'Copied response'), 'success');
                 }}
               >
@@ -342,14 +345,14 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             {tab === 'body' && !isImage && (
               <div className="segmented">
                 <button className={bodyMode === 'pretty' ? 'active' : ''} onClick={() => setBodyMode('pretty')}>
-                  {isSse ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
+                  {stream ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
                 </button>
                 <button className={bodyMode === 'raw' ? 'active' : ''} onClick={() => setBodyMode('raw')}>
                   {t('原始', 'Raw')}
                 </button>
-                {(isHtml || isSse) && (
+                {(isHtml || stream) && (
                   <button className={bodyMode === 'preview' ? 'active' : ''} onClick={() => setBodyMode('preview')}>
-                    {isSse ? t('事件流', 'Events') : t('网页预览', 'Preview')}
+                    {stream ? t('事件流', 'Events') : t('网页预览', 'Preview')}
                   </button>
                 )}
               </div>
@@ -367,25 +370,26 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                       style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, border: '1px solid var(--border)' }}
                     />
                   </div>
-                ) : isSse && parsedSse && bodyMode === 'pretty' ? (
+                ) : stream && bodyMode === 'pretty' ? (
                   <div className="sse-view">
-                    {parsedSse.assembledReasoning && (
+                    {stream.error && <div className="jq-error" role="alert">{stream.error}</div>}
+                    {stream.assembledReasoning && (
                       <div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>{t('思考过程', 'Reasoning')}</div>
-                        <div className="sse-reasoning">{parsedSse.assembledReasoning}</div>
+                        <div className="sse-reasoning">{stream.assembledReasoning}</div>
                       </div>
                     )}
                     <div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
                         <span>
                           {t(
-                            `AI 流式回复拼接（共 ${parsedSse.events.length} 个事件${parsedSse.done ? ' · 已结束' : ''}）`,
-                            `Assembled SSE stream (${parsedSse.events.length} events${parsedSse.done ? ' · Done' : ''})`,
+                            `AI 流式回复拼接（共 ${stream.events.length} 个事件${stream.done ? ' · 已结束' : ''}）`,
+                            `Assembled ${stream.format} stream (${stream.events.length} events${stream.done ? ' · Done' : ''})`,
                           )}
                         </span>
                       </div>
                       <div className="sse-answer-box">
-                        {parsedSse.assembledText || (
+                        {stream.assembledText || (
                           <span style={{ color: 'var(--text-muted)' }}>
                             {t(
                               '（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）',
@@ -396,9 +400,9 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                       </div>
                     </div>
                   </div>
-                ) : isSse && parsedSse && bodyMode === 'preview' ? (
+                ) : stream && bodyMode === 'preview' ? (
                   <div className="tab-scroll" style={{ padding: 0 }}>
-                    {parsedSse.events.map((ev, idx) => (
+                    {stream.events.map((ev, idx) => (
                       <div key={idx} className="sse-event-row">
                         <span style={{ color: 'var(--text-muted)', width: 32, flexShrink: 0 }}>#{idx + 1}</span>
                         {ev.event && <span className="pill pill-accent">{ev.event}</span>}
