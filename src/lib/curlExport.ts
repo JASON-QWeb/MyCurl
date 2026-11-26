@@ -83,16 +83,7 @@ export function exportAsFetch(data: AppData, req: HttpRequest, opts: CodeGenOpti
     lines.push(`  headers: ${JSON.stringify(headersObj, null, 2).replace(/\n/g, '\n  ')},`);
   }
   if (prep.body.kind === 'text') {
-    if (req.body.type === 'json') {
-      try {
-        const parsed = JSON.parse(prep.body.text);
-        lines.push(`  body: JSON.stringify(${JSON.stringify(parsed, null, 2).replace(/\n/g, '\n  ')}),`);
-      } catch {
-        lines.push(`  body: ${JSON.stringify(prep.body.text)},`);
-      }
-    } else {
-      lines.push(`  body: ${JSON.stringify(prep.body.text)},`);
-    }
+    lines.push(`  body: ${JSON.stringify(prep.body.text)},`);
   }
   lines.push(`});`);
   lines.push(`const data = await res.json();`);
@@ -103,6 +94,9 @@ export function exportAsFetch(data: AppData, req: HttpRequest, opts: CodeGenOpti
 export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOptions = { secretMode: 'mask' }): string {
   const vars = buildVarMap(data, req, opts.secretMode);
   const prep = prepareRequest(data, req, vars);
+  if (req.body.type === 'json' && !prep.headers.some(([key]) => key.toLowerCase() === 'content-type')) {
+    prep.headers.push(['Content-Type', 'application/json']);
+  }
   const headersObj: Record<string, string> = {};
   for (const [k, v] of prep.headers) headersObj[k] = v;
 
@@ -113,23 +107,9 @@ export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOpt
   }
   let bodyArg = '';
   if (prep.body.kind === 'text') {
-    if (req.body.type === 'json') {
-      try {
-        const parsed = JSON.parse(prep.body.text);
-        const pyJson = JSON.stringify(parsed, null, 4)
-          .replace(/\btrue\b/g, 'True')
-          .replace(/\bfalse\b/g, 'False')
-          .replace(/\bnull\b/g, 'None');
-        lines.push(`payload = ${pyJson}`);
-        bodyArg = ', json=payload';
-      } catch {
-        lines.push(`payload = ${JSON.stringify(prep.body.text)}`);
-        bodyArg = ', data=payload';
-      }
-    } else {
-      lines.push(`payload = ${JSON.stringify(prep.body.text)}`);
-      bodyArg = ', data=payload';
-    }
+    const encoding = req.body.type === 'json' ? '.encode("utf-8")' : '';
+    lines.push(`payload = ${JSON.stringify(prep.body.text)}${encoding}`);
+    bodyArg = ', data=payload';
   }
   const hArg = Object.keys(headersObj).length ? ', headers=headers' : '';
   lines.push('');
