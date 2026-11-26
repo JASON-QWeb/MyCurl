@@ -1,6 +1,6 @@
 import { isSseContent, parseSse, type SseEvent } from './sse';
 
-interface ResponseStream {
+export interface ResponseStream {
   format: 'SSE' | 'NDJSON';
   events: SseEvent[];
   assembledText: string;
@@ -16,6 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseOllamaStream(body: string, receiving: boolean): ResponseStream | null {
   const stream: ResponseStream = { format: 'NDJSON', events: [], assembledText: '', assembledReasoning: '', done: false };
   const lines = body.split(/\r\n?|\n/);
+  let identified = false;
 
   for (const [index, line] of lines.entries()) {
     const data = line.trim();
@@ -34,17 +35,19 @@ function parseOllamaStream(body: string, receiving: boolean): ResponseStream | n
       stream.error = chunk.error.replace(/\r\n?/g, '\n');
       continue;
     }
-    if (typeof chunk.model !== 'string' || typeof chunk.done !== 'boolean') return null;
+    const finalUsage = chunk.done === true && (typeof chunk.prompt_eval_count === 'number' || typeof chunk.eval_count === 'number');
+    if (typeof chunk.done !== 'boolean') return null;
+    identified ||= typeof chunk.model === 'string' || finalUsage;
     const message = isRecord(chunk.message) ? chunk.message : null;
     const text = message ? message.content : chunk.response;
     const thinking = message ? message.thinking : chunk.thinking;
-    if (typeof text !== 'string' && typeof thinking !== 'string') return null;
+    if (!finalUsage && typeof text !== 'string' && typeof thinking !== 'string') return null;
     if (typeof text === 'string') stream.assembledText += text;
     if (typeof thinking === 'string') stream.assembledReasoning += thinking;
     stream.done ||= chunk.done;
-    stream.events.push({ data });
+    stream.events.push({ data, parsed: chunk });
   }
-  if (!stream.events.length) return null;
+  if (!identified && stream.error === undefined) return null;
   stream.assembledText = stream.assembledText.replace(/\r\n?/g, '\n');
   stream.assembledReasoning = stream.assembledReasoning.replace(/\r\n?/g, '\n');
   return stream;

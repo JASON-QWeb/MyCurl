@@ -3,10 +3,12 @@ import { useAppStore } from '../store/useAppStore';
 import type { HttpRequest, ResponseRecord } from '../lib/types';
 import { applyFilterToText } from '../lib/jq';
 import { parseResponseStream, streamCopyText } from '../lib/responseStream';
+import { extractAiUsage, type AiUsage } from '../lib/aiUsage';
 import { prettyJson } from '../lib/curlParser';
 import { copyText, formatBytes, formatMs, maskSecret, relativeTime } from '../lib/util';
 import { useI18n } from '../lib/i18n';
 import { CodeEditor, type CodeLang } from './CodeEditor';
+import { ResponseStreamChat } from './ResponseStreamChat';
 import {
   IconCopy,
   IconDownload,
@@ -34,6 +36,22 @@ function detectLang(ct: string, body: string): CodeLang {
   if (lower.includes('xml')) return 'xml';
   if (lower.includes('javascript')) return 'javascript';
   return 'text';
+}
+
+function AiUsageChip({ usage }: { usage: AiUsage }) {
+  const { t } = useI18n();
+  const { inputTokens, outputTokens, reasoningTokens, totalTokens } = usage;
+  const counts = [];
+  if (inputTokens !== undefined) counts.push(`↑${inputTokens}`);
+  if (outputTokens !== undefined) counts.push(`↓${outputTokens}`);
+  if (!counts.length) counts.push(totalTokens ?? `${t('推理', 'Reasoning')} ${reasoningTokens}`);
+  const title = [
+    t(`输入词元：${inputTokens ?? '—'}`, `Input tokens: ${inputTokens ?? '—'}`),
+    t(`输出词元：${outputTokens ?? '—'}`, `Output tokens: ${outputTokens ?? '—'}`),
+    t(`推理词元：${reasoningTokens ?? '—'}`, `Reasoning tokens: ${reasoningTokens ?? '—'}`),
+    t(`总词元：${totalTokens ?? '—'}`, `Total tokens: ${totalTokens ?? '—'}`),
+  ].join('\n');
+  return <span className="metric-chip" title={title}>{t(`${counts.join(' ')} 词元`, `${counts.join(' ')} tok`)}</span>;
 }
 
 export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?: boolean }> = ({ req, dark, vertical }) => {
@@ -75,6 +93,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     () => resp ? parseResponseStream(resp.contentType, resp.body, receiving) : null,
     [resp, receiving],
   );
+  const aiUsage = useMemo(() => resp ? extractAiUsage(resp.contentType, resp.body, stream) : null, [resp, stream]);
   const isImage = useMemo(() => !!(resp?.bodyBase64 && /^image\//i.test(resp.contentType)), [resp]);
   const isHtml = useMemo(() => !!(resp && /text\/html/i.test(resp.contentType)), [resp]);
 
@@ -156,9 +175,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               <span className={`status-pill ${statusClass(resp.status)}`}>
                 {resp.status} {resp.statusText}
               </span>
-              <span className="metric-chip" title={resp.ttfbMs ? `TTFB: ${formatMs(resp.ttfbMs)}` : undefined}>
-                {formatMs(resp.timeMs)}
-              </span>
+              <span className="metric-chip">{formatMs(resp.timeMs)}</span>
               <span className="metric-chip">{formatBytes(resp.size)}</span>
               {resp.redirects && resp.redirects.length > 0 && (
                 <span className="pill pill-info" title={resp.redirects.join('\n')}>
@@ -169,6 +186,12 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             </>
           )}
           {resp?.error && <span className="status-pill status-err">{t('请求异常', 'Request Error')}</span>}
+          {resp?.ttfbMs != null && resp.ttfbMs > 0 && (
+            <span className="metric-chip" title={t('首字节时间（从发送请求到收到响应的第一个字节）', 'Time to First Byte (from sending the request to receiving the first response byte)')}>
+              TTFB {formatMs(resp.ttfbMs)}
+            </span>
+          )}
+          {aiUsage && <AiUsageChip usage={aiUsage} />}
           {!resp && !running && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('响应结果', 'Response')}</span>}
         </div>
 
@@ -233,7 +256,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                           {formatMs(h.timeMs)} · {formatBytes(h.size)}
                         </span>
                       </span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{relativeTime(h.createdAt)}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{relativeTime(h.createdAt, lang)}</span>
                     </button>
                     <button
                       className="btn btn-ghost btn-icon btn-sm"
@@ -379,39 +402,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                     />
                   </div>
                 ) : stream && bodyMode === 'pretty' ? (
-                  <div className="sse-view">
-                    {stream.error && (
-                      <div className="jq-error" role="alert">{t(`流式响应错误：${stream.error}`, `Stream error: ${stream.error}`)}</div>
-                    )}
-                    {stream.assembledReasoning && (
-                      <div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>{t('思考过程', 'Reasoning')}</div>
-                        <div className="sse-reasoning">{stream.assembledReasoning}</div>
-                      </div>
-                    )}
-                    {(!stream.error || stream.assembledText) && (
-                      <div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-                          <span>
-                            {t(
-                              `AI 流式回复拼接（共 ${stream.events.length} 个事件${stream.done ? ' · 已结束' : ''}）`,
-                              `Assembled ${stream.format} stream (${stream.events.length} events${stream.done ? ' · Done' : ''})`,
-                            )}
-                          </span>
-                        </div>
-                        <div className="sse-answer-box">
-                          {stream.assembledText || (
-                            <span style={{ color: 'var(--text-muted)' }}>
-                              {t(
-                                '（暂未解析到对话增量文本，请切换到「事件流」或「原始」查看）',
-                                '(No text delta parsed yet — switch to "Events" or "Raw" to inspect)',
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <ResponseStreamChat key={resp.id} stream={stream} />
                 ) : stream && bodyMode === 'preview' ? (
                   <div className="tab-scroll" style={{ padding: 0 }}>
                     {stream.events.map((ev, idx) => (

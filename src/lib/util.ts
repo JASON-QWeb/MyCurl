@@ -1,3 +1,6 @@
+import type { Language } from './types';
+import { tr } from './translate';
+
 export function uid(prefix = ''): string {
   const rand = Math.random().toString(36).slice(2, 10);
   const time = Date.now().toString(36).slice(-6);
@@ -25,11 +28,17 @@ export function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function relativeTime(ts: number): string {
+export function relativeTime(ts: number, lang?: Language): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`;
+  if (diff < 60_000) return tr(lang, '刚刚', 'Just now');
+  if (diff < 3600_000) {
+    const minutes = Math.floor(diff / 60_000);
+    return tr(lang, `${minutes} 分钟前`, `${minutes}m ago`);
+  }
+  if (diff < 86400_000) {
+    const hours = Math.floor(diff / 3600_000);
+    return tr(lang, `${hours} 小时前`, `${hours}h ago`);
+  }
   return formatTime(ts).slice(0, 16);
 }
 

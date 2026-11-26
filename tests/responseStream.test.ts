@@ -66,3 +66,29 @@ describe('Ollama response streams', () => {
     expect(stream).toMatchObject({ format: 'SSE', assembledText: 'That', done: true });
   });
 });
+
+describe('SSE reasoning and errors', () => {
+  it('assembles both Responses reasoning delta types separately from answer text', () => {
+    const body = [
+      { type: 'response.reasoning_text.delta', delta: 'First. ' },
+      { type: 'response.reasoning_summary_text.delta', delta: 'Second.' },
+      { type: 'response.output_text.delta', delta: 'Answer' },
+      { type: 'response.completed' },
+    ].map(item => 'data: ' + JSON.stringify(item)).join('\n\n');
+    expect(parseResponseStream('text/event-stream', body)).toMatchObject({
+      assembledReasoning: 'First. Second.', assembledText: 'Answer', done: true,
+    });
+  });
+
+  it.each([
+    ['event: error\ndata: plain failure', 'plain failure'],
+    ['event: error\ndata: "quoted failure"', 'quoted failure'],
+    ['data: {"type":"error","message":"failure"}', 'failure'],
+    ['data: {"error":"capacity reached"}', 'capacity reached'],
+    ['data: {"error":{"message":"overloaded"},"message":"outer"}', 'overloaded'],
+    ['event: error', ''],
+  ])('retains partial output and the error from %s', (frame, error) => {
+    const body = 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n' + frame;
+    expect(parseResponseStream('text/event-stream', body)).toMatchObject({ assembledText: 'partial', error });
+  });
+});

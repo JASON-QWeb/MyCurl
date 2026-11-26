@@ -1316,15 +1316,39 @@ button {
   flex-direction: column;
   gap: 12px;
 }
+.sse-section-head,
+.sse-answer-actions,
+.sse-reason-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sse-section-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.sse-reason-toggle {
+  flex: 1;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.sse-reason-toggle:hover { color: var(--text); }
 .sse-answer-box {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px;
-  white-space: pre-wrap;
   line-height: 1.65;
   font-size: 13.5px;
 }
+.sse-answer-box.plain-text { white-space: pre-wrap; }
 .sse-reasoning {
   background: var(--bg-elev);
   border: 1px dashed var(--border-strong);
