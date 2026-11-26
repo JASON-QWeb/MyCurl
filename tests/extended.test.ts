@@ -106,7 +106,7 @@ describe('请求构建、代码与文档导出', () => {
 
     const py = exportAsPython(data, req, { secretMode: 'mask' });
     expect(py).toContain('import requests');
-    expect(py).toContain('json=payload');
+    expect(py).toContain('data=payload');
 
     const folderDoc = generateFolderDoc(data, folder);
     expect(folderDoc).toContain('# api.example-llm.dev');
