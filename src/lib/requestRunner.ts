@@ -4,6 +4,7 @@
 import type { AppData, Auth, Folder, HttpRequest, KV, ResponseRecord } from './types';
 import { folderChain, renderTemplate, resolveVariables, type VarMap } from './template';
 import { uid } from './util';
+import { responseTextDecoder } from './responseEncoding';
 import { splitUrl } from './urlParams';
 import { createTauriChannel, isTauri, tauriInvoke } from './bridge';
 
@@ -265,7 +266,7 @@ export async function executeRequest(
     return { ...record, error: '请输入请求 URL' };
   }
 
-  const textDecoder = new TextDecoder('utf-8', { fatal: false });
+  let textDecoder = new TextDecoder();
   const binChunks: Uint8Array[] = [];
   let binSize = 0;
   let binary = false;
@@ -292,6 +293,7 @@ export async function executeRequest(
       const ct = record.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1] || '';
       record.contentType = ct;
       binary = isBinaryContentType(ct);
+      if (!binary) textDecoder = responseTextDecoder(ct);
       emit(true);
     } else if (evt.t === 'data') {
       const bytes = base64ToBytes(evt.b64);
