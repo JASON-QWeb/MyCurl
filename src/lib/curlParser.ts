@@ -8,6 +8,7 @@
  *  - 管道（| jq '...'）、export VAR=xxx 赋值、多条命令批量粘贴
  */
 import type { Auth, BodyType } from './types';
+import { appendCurlQuery, parseUrlQuery } from './curlQuery';
 
 export interface ParsedHeader {
   key: string;
@@ -658,9 +659,12 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
       case 'url':
         url = value ?? '';
         break;
-      case 'url-query':
-        if (value) urlQueries.push(value);
+      case 'url-query': {
+        if (value === undefined) break;
+        const query = parseUrlQuery(value, warnings);
+        if (query !== undefined) urlQueries.push(query);
         break;
+      }
       case 'data':
       case 'data-ascii':
       case 'data-binary':
@@ -832,8 +836,8 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
   if (finalUrl && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(finalUrl) && !finalUrl.startsWith('{{')) {
     finalUrl = 'http://' + finalUrl;
   }
-  if (urlQueries.length) {
-    finalUrl += (finalUrl.includes('?') ? '&' : '?') + urlQueries.join('&');
+  if (urlQueries.length && !(getMode && dataParts.length)) {
+    finalUrl = appendCurlQuery(finalUrl, urlQueries.join('&'));
   }
 
   let bodyText = dataParts.join(jsonMode ? '' : '&');
@@ -842,7 +846,7 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
   let graphql: { query: string; variables: string } | undefined;
 
   if (getMode && dataParts.length) {
-    finalUrl += (finalUrl.includes('?') ? '&' : '?') + bodyText;
+    finalUrl = appendCurlQuery(finalUrl, bodyText);
     bodyText = '';
   } else if (multipart.length) {
     bodyType = 'multipart';
