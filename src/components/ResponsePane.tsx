@@ -1,33 +1,27 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { HttpRequest, ResponseRecord } from '../lib/types';
 import { applyFilterToText } from '../lib/jq';
 import { parseResponseStream, streamCopyText } from '../lib/responseStream';
 import { extractAiUsage, type AiUsage } from '../lib/aiUsage';
 import { prettyJson } from '../lib/curlParser';
-import { copyText, formatBytes, formatMs, maskSecret, relativeTime } from '../lib/util';
+import { copyText, formatBytes, formatMs, isCredentialKey, maskSecret } from '../lib/util';
+import { isComparableResponse } from '../lib/textDiff';
 import { useI18n } from '../lib/i18n';
 import { CodeEditor, type CodeLang } from './CodeEditor';
 import { ResponseStreamChat } from './ResponseStreamChat';
+import { ResponseDiffView } from './ResponseDiffView';
+import { ResponseFilterBar } from './ResponseFilterBar';
+import { ResponseHistoryMenu } from './ResponseHistoryMenu';
+import { ResponseStatusPill } from './ResponseStatusPill';
+import './responsePane.css';
 import {
   IconCopy,
   IconDownload,
   IconEye,
   IconEyeOff,
-  IconFilter,
-  IconHistory,
   IconSparkles,
-  IconTrash,
-  IconX,
 } from './Icons';
-
-function statusClass(code: number, error?: string) {
-  if (error || code === 0) return 'status-err';
-  if (code < 300) return 'status-2xx';
-  if (code < 400) return 'status-3xx';
-  if (code < 500) return 'status-4xx';
-  return 'status-5xx';
-}
 
 function detectLang(ct: string, body: string): CodeLang {
   const lower = ct.toLowerCase();
@@ -36,6 +30,14 @@ function detectLang(ct: string, body: string): CodeLang {
   if (lower.includes('xml')) return 'xml';
   if (lower.includes('javascript')) return 'javascript';
   return 'text';
+}
+
+function sentHeaderValue(key: string, value: string, reveal: boolean) {
+  if (reveal || !isCredentialKey(key)) return value;
+  const scheme = /^(?:Bearer|Basic)\s+/i.exec(value)?.[0] ?? '';
+  const credential = value.slice(scheme.length);
+  // A cookie list or a partially resolved template can contain several credentials.
+  return scheme + (/[\s;,]|\{\{/.test(credential) ? '••••' : maskSecret(credential));
 }
 
 function AiUsageChip({ usage }: { usage: AiUsage }) {
@@ -60,24 +62,14 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     histories,
     activeResponseId,
     inFlight,
-    updateRequest,
-    selectResponse,
-    deleteResponseHistory,
     toast,
   } = useAppStore();
   const { lang, t } = useI18n();
 
-  const jqPresets = [
-    { label: t('AI 回复', 'AI Reply'), expr: '.choices[0].message.content // .error.message // .' },
-    { label: t('模型列表', 'Models'), expr: '.data[].id' },
-    { label: 'Claude', expr: '.content[0].text // .error.message // .' },
-    { label: 'Gemini', expr: '.candidates[0].content.parts[0].text // .error.message // .' },
-  ];
-
   const [tab, setTab] = useState<'body' | 'headers' | 'request'>('body');
   const [bodyMode, setBodyMode] = useState<'pretty' | 'raw' | 'preview'>('pretty');
   const [filterEnabled, setFilterEnabled] = useState(true);
-  const [histOpen, setHistOpen] = useState(false);
+  const [comparison, setComparison] = useState<{ requestId: string; targetId: string } | null>(null);
   const [headerQuery, setHeaderQuery] = useState('');
   const [showReqSecrets, setShowReqSecrets] = useState(false);
 
@@ -87,6 +79,11 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
   const resp: ResponseRecord | null = running
     ? running.partial
     : history.find((h) => h.id === activeId) ?? history[0] ?? null;
+  const baseline = comparison?.requestId === req.id && resp && isComparableResponse(resp)
+    ? history.find(h => h.id === comparison.targetId && h.id !== resp.id && isComparableResponse(h)) : undefined;
+  useEffect(() => {
+    if (comparison && !baseline) setComparison(null);
+  }, [comparison, baseline]);
 
   const receiving = !!running;
   const stream = useMemo(
@@ -123,14 +120,16 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     return bodyMode === 'raw' ? 'text' : detectLang(resp.contentType, resp.body);
   }, [resp, filterResult, bodyMode]);
 
-  const copyBody = async () => {
+  const copy = async (value: string, success: string, failure: string) => {
     try {
-      await copyText(stream ? streamCopyText(stream, displayedBody, bodyMode === 'pretty') : displayedBody);
-      toast(t('已复制响应内容', 'Copied response'), 'success');
+      await copyText(value);
+      toast(success, 'success');
     } catch {
-      toast(t('无法复制响应内容', 'Could not copy the response'), 'error');
+      toast(failure, 'error');
     }
   };
+  const copyBody = () => copy(stream ? streamCopyText(stream, displayedBody, bodyMode === 'pretty') : displayedBody,
+    t('已复制响应内容', 'Copied response'), t('无法复制响应内容', 'Could not copy the response'));
 
   const downloadBody = () => {
     if (!resp) return;
@@ -172,9 +171,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           )}
           {resp && !resp.error && resp.status > 0 && (
             <>
-              <span className={`status-pill ${statusClass(resp.status)}`}>
-                {resp.status} {resp.statusText}
-              </span>
+              <ResponseStatusPill resp={resp} />
               <span className="metric-chip">{formatMs(resp.timeMs)}</span>
               <span className="metric-chip">{formatBytes(resp.size)}</span>
               {resp.redirects && resp.redirects.length > 0 && (
@@ -211,120 +208,15 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             </>
           )}
 
-          {/* 历史记录下拉 */}
-          <div className="dropdown-wrap">
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setHistOpen((v) => !v)}
-              disabled={history.length === 0}
-              title={t('查看历史响应', 'Response history')}
-            >
-              <IconHistory size={13} />
-              <span>{t('历史', 'History')}{history.length > 0 ? ` (${history.length})` : ''}</span>
-            </button>
-            {histOpen && (
-              <div className="menu-pop right" style={{ minWidth: 270, maxHeight: 320, overflowY: 'auto' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px' }}>
-                  <span className="menu-title" style={{ padding: 0 }}>
-                    {t('最近响应记录', 'Recent Responses')}
-                  </span>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ color: 'var(--danger)', height: 20, fontSize: 11 }}
-                    onClick={() => {
-                      deleteResponseHistory(req.id);
-                      setHistOpen(false);
-                    }}
-                  >
-                    {t('清空', 'Clear')}
-                  </button>
-                </div>
-                {history.map((h) => (
-                  <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <button
-                      className={`menu-item ${h.id === resp?.id ? 'active' : ''}`}
-                      onClick={() => {
-                        selectResponse(req.id, h.id);
-                        setHistOpen(false);
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span className={`status-pill ${statusClass(h.status, h.error)}`} style={{ fontSize: 10.5, padding: '1px 5px' }}>
-                          {h.error ? 'ERR' : h.status}
-                        </span>
-                        <span className="mono" style={{ fontSize: 11 }}>
-                          {formatMs(h.timeMs)} · {formatBytes(h.size)}
-                        </span>
-                      </span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{relativeTime(h.createdAt, lang)}</span>
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-icon btn-sm"
-                      onClick={() => deleteResponseHistory(req.id, h.id)}
-                      title={t('删除此记录', 'Delete entry')}
-                    >
-                      <IconTrash size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ResponseHistoryMenu requestId={req.id} history={history} current={resp} onCompare={targetId => {
+            setComparison({ requestId: req.id, targetId });
+            setTab('body');
+          }} />
         </div>
       </div>
 
-      {/* jq / JSONPath 筛选栏 */}
-      <div className="jq-bar">
-        <IconFilter size={13} className="jq-icon" />
-        <input
-          className="jq-input"
-          placeholder={t(
-            'jq / JSONPath 筛选（如 .choices[0].message.content // .error.message // .）',
-            'jq / JSONPath filter (e.g. .choices[0].message.content // .error.message // .)',
-          )}
-          value={filterExpr}
-          onChange={(e) => {
-            updateRequest(req.id, { responseFilter: e.target.value });
-            if (!filterEnabled) setFilterEnabled(true);
-          }}
-        />
-        {filterExpr.trim() ? (
-          <>
-            <div className="segmented">
-              <button className={filterEnabled ? 'active' : ''} onClick={() => setFilterEnabled(true)}>
-                {t('筛选', 'Filtered')}
-              </button>
-              <button className={!filterEnabled ? 'active' : ''} onClick={() => setFilterEnabled(false)}>
-                {t('原始', 'Raw')}
-              </button>
-            </div>
-            <button
-              className="btn btn-ghost btn-icon btn-sm"
-              title={t('清除筛选表达式', 'Clear filter')}
-              onClick={() => updateRequest(req.id, { responseFilter: '' })}
-            >
-              <IconX size={13} />
-            </button>
-          </>
-        ) : (
-          <div style={{ display: 'flex', gap: 4 }}>
-            {jqPresets.slice(0, 2).map((p) => (
-              <button
-                key={p.expr}
-                className="btn btn-ghost btn-sm"
-                style={{ fontSize: 11, height: 22, padding: '0 6px' }}
-                onClick={() => {
-                  updateRequest(req.id, { responseFilter: p.expr });
-                  setFilterEnabled(true);
-                }}
-                title={p.expr}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <ResponseFilterBar req={req} presetBody={stream ? undefined : resp?.body}
+        enabled={filterEnabled} setEnabled={setFilterEnabled} filteredValue={filterResult?.ok ? filterResult.output : undefined} />
 
       {filterResult && !filterResult.ok && (
         <div className="jq-error">
@@ -343,7 +235,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             )}
           </p>
         </div>
-      ) : resp.error ? (
+      ) : resp.error && !baseline ? (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div className="error-card">
             <h4>{t('请求未能完成', 'Request Failed')}</h4>
@@ -359,7 +251,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
             <div className="tabs-list">
               <button className={`tab-btn ${tab === 'body' ? 'active' : ''}`} onClick={() => setTab('body')}>
                 {t('响应体', 'Body')}
-                {filterResult?.ok && (
+                {filterResult?.ok && !baseline && (
                   <span className="pill pill-success" style={{ padding: '0 5px', fontSize: 10 }}>
                     {t('jq 已筛选', 'jq filtered')}
                   </span>
@@ -373,7 +265,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 {t('实际请求', 'Sent Request')}
               </button>
             </div>
-            {tab === 'body' && !isImage && (
+            {tab === 'body' && !isImage && !baseline && (
               <div className="segmented">
                 <button className={bodyMode === 'pretty' ? 'active' : ''} onClick={() => setBodyMode('pretty')}>
                   {stream ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
@@ -393,7 +285,9 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           <div className="tab-panel">
             {tab === 'body' && (
               <>
-                {isImage ? (
+                {baseline ? (
+                  <ResponseDiffView baseline={baseline} current={resp} onExit={() => setComparison(null)} />
+                ) : isImage ? (
                   <div className="tab-scroll" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <img
                       src={`data:${resp.contentType};base64,${resp.bodyBase64}`}
@@ -459,7 +353,14 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                           {k}
                         </td>
                         <td className="mono" style={{ fontSize: 12, color: 'var(--text-dim)', wordBreak: 'break-all' }}>
-                          {v}
+                          <div className="response-header-value">
+                            <span>{v}</span>
+                            <button className="btn btn-ghost btn-icon btn-sm"
+                              title={t(`复制 ${k} 的值`, `Copy ${k} value`)}
+                              onClick={() => copy(v, t('已复制响应头的值', 'Copied header value'), t('无法复制响应头的值', 'Could not copy header value'))}>
+                              <IconCopy size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -499,8 +400,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <table className="kv-table">
                     <tbody>
                       {(resp.requestHeaders ?? []).map(([k, v], i) => {
-                        const isSensitive = /authorization|api[-_]?key|token|cookie|secret/i.test(k);
-                        const shown = isSensitive && !showReqSecrets ? v.replace(/(Bearer\s+|Basic\s+)?(\S+)/, (_, p, tok) => `${p || ''}${maskSecret(tok)}`) : v;
+                        const shown = sentHeaderValue(k, v, showReqSecrets);
                         return (
                           <tr key={i}>
                             <td className="mono" style={{ fontSize: 11.5, width: '34%', color: 'var(--var-fg)' }}>

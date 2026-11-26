@@ -31,3 +31,10 @@ export function button(container: ParentNode, label: string) {
 export async function click(element: HTMLElement) {
   await act(async () => { element.click(); });
 }
+
+export function typeInput(input: HTMLInputElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}

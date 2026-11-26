@@ -5,7 +5,7 @@ import type { AppData, Auth, Folder, HttpRequest, KV, Language, ResponseRecord }
 import { findTemplateVars, folderChain, render, renderTemplate, resolveVariables, type VarMap } from './template';
 import { uid } from './util';
 import { tr } from './translate';
-import { responseTextDecoder } from './responseEncoding';
+import { isBinaryContentType, responseTextDecoder } from './responseEncoding';
 import { splitUrl } from './urlParams';
 import { createTauriChannel, isTauri, tauriInvoke } from './bridge';
 
@@ -245,13 +245,6 @@ function prepareBody(rb: HttpRequest['body'], r: (input: string) => string, lang
     bodyPreview = fields.map(f => `${f.name}=${f.isFile ? tr(lang, `[文件:${f.fileName}]`, `[File:${f.fileName}]`) : f.value}`).join('\n');
   }
   return { body, bodyPreview };
-}
-
-function isBinaryContentType(ct: string): boolean {
-  const lower = ct.toLowerCase();
-  if (!lower) return false;
-  if (/text\/|json|xml|javascript|ecmascript|x-www-form-urlencoded|event-stream|graphql|yaml|csv|svg\+xml/.test(lower)) return false;
-  return /image\/|audio\/|video\/|application\/octet-stream|application\/pdf|application\/zip|application\/gzip|font\//.test(lower);
 }
 
 function base64ToBytes(b64: string): Uint8Array {

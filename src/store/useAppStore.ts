@@ -9,6 +9,7 @@ import { SECRET_NAME_RE } from '../lib/template';
 import { kv, uid } from '../lib/util';
 import { tr } from '../lib/translate';
 import { readPostmanEnvironment } from '../lib/postmanEnvironment';
+import type { SaveTargetScope } from '../lib/responseExtract';
 
 export interface ToastItem {
   id: string;
@@ -100,6 +101,7 @@ interface AppStore {
   // 请求
   createRequest: (folderId: string | null, partial?: Partial<HttpRequest>) => HttpRequest;
   updateRequest: (id: string, patch: Partial<HttpRequest>) => void;
+  upsertVariable: (scope: Pick<SaveTargetScope, 'kind' | 'id'>, name: string, value: string, secret: boolean) => boolean;
   defineRequestVariable: (requestId: string, name: string) => Promise<void>;
   duplicateRequest: (id: string) => HttpRequest | null;
   moveRequest: (id: string, folderId: string | null) => void;
@@ -499,6 +501,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
 
+  upsertVariable: (scope, name, value, secret) => {
+    const { data, updateFolder, updateEnvironment } = get();
+    const holders = scope.kind === 'folder' ? data.folders : data.environments;
+    const current = holders.find(holder => holder.id === scope.id);
+    if (!current) return false;
+    const existing = current.variables.find(v => v.key.trim() === name);
+    const updated = { ...(existing ?? kv(name)), key: name, value, enabled: true, secret: !!existing?.secret || secret };
+    const variables = existing ? current.variables.map(v => v === existing ? updated : v) : [...current.variables, updated];
+    if (scope.kind === 'folder') updateFolder(scope.id, { variables });
+    else updateEnvironment(scope.id, { variables });
+    return true;
+  },
+
   defineRequestVariable: async (requestId, name) => {
     const { data, prompt } = get();
     const req = data.requests.find(r => r.id === requestId);
@@ -515,17 +530,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       confirmLabel: tr(lang, '保存', 'Save'),
     });
     if (!value?.trim()) return;
-    const holders = folder ? get().data.folders : get().data.environments;
-    const current = holders.find(holder => holder.id === scope.id);
-    if (!current) return;
-    const existing = current.variables.find(v => v.key.trim() === name);
-    const updated = { ...(existing ?? kv(name)), key: name, value, enabled: true, secret: !!existing?.secret || SECRET_NAME_RE.test(name) };
-    const variables = existing
-      ? current.variables.map(v => v === existing ? updated : v)
-      : [...current.variables, updated];
-    if (folder) get().updateFolder(scope.id, { variables });
-    else get().updateEnvironment(scope.id, { variables });
-    get().toast(tr(lang, `已将 ${label} 保存到${target}`, `Saved ${label} to ${target}`), 'success');
+    if (get().upsertVariable({ kind: folder ? 'folder' : 'base', id: scope.id }, name, value, SECRET_NAME_RE.test(name))) {
+      get().toast(tr(lang, `已将 ${label} 保存到${target}`, `Saved ${label} to ${target}`), 'success');
+    }
   },
 
   duplicateRequest: (id) => {
