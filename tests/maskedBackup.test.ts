@@ -57,3 +57,15 @@ it('omits embedded multipart bytes while keeping metadata and the complete backu
   expect(exportMyCurlJson(data, true)).not.toContain(field.fileData);
   expect(exportMyCurlJson(data, false)).toContain(field.fileData);
 });
+
+it('redacts every value of a duplicate JSON credential key preserved on import', () => {
+  const first = randomUUID();
+  const second = randomUUID();
+  const body = `{ "token":"${first}", "\\u0074oken":"${second}", "id":9007199254740993 }`;
+  const data = importCommand(`curl http://localhost --json '${body}'`, false);
+  expect(data.requests[0].body.text).toBe(body);
+  const masked = exportMyCurlJson(data, true);
+  expect(masked).not.toContain(first);
+  expect(masked).not.toContain(second);
+  expect(JSON.parse(masked).requests[0].body.text).toContain('"id":9007199254740993');
+});

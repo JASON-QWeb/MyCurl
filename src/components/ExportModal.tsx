@@ -60,19 +60,19 @@ export const ExportModal: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
             <div className="segmented">
               <button className={lang === 'curl' ? 'active' : ''} onClick={() => setLang('curl')}>
-                cURL
+                {t('cURL', 'cURL')}
               </button>
               <button className={lang === 'fetch' ? 'active' : ''} onClick={() => setLang('fetch')}>
-                JavaScript fetch
+                {t('JS fetch', 'JS fetch')}
               </button>
               <button className={lang === 'python' ? 'active' : ''} onClick={() => setLang('python')}>
-                Python requests
+                {t('Python', 'Python')}
               </button>
               <button className={lang === 'http' ? 'active' : ''} onClick={() => setLang('http')}>
-                .http
+                {t('.http', '.http')}
               </button>
               <button className={lang === 'markdown' ? 'active' : ''} onClick={() => setLang('markdown')}>
-                {t('Markdown 文档', 'Markdown')}
+                {t('Markdown', 'Markdown')}
               </button>
             </div>
 

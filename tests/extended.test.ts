@@ -103,10 +103,11 @@ describe('请求构建、代码与文档导出', () => {
     const js = exportAsFetch(data, req, { secretMode: 'mask' });
     expect(js).toContain('await fetch("https://api.example-llm.dev/v1/chat/completions"');
     expect(js).not.toContain('sk-demo0000111122223333444455556666777788889999');
+    expect(js).toContain('body: JSON.stringify({');
 
     const py = exportAsPython(data, req, { secretMode: 'mask' });
     expect(py).toContain('import requests');
-    expect(py).toContain('data=payload');
+    expect(py).toContain('json=payload');
 
     const folderDoc = generateFolderDoc(data, folder);
     expect(folderDoc).toContain('# api.example-llm.dev');

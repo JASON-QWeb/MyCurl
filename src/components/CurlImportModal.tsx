@@ -42,7 +42,7 @@ export const CurlImportModal: React.FC = () => {
     applyBatchImport,
     toast,
   } = useAppStore();
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
 
   const [raw, setRaw] = useState(importModal?.initialText ?? '');
   const [extractSecrets, setExtractSecrets] = useState(data.settings.import.extractSecrets);
@@ -67,7 +67,7 @@ export const CurlImportModal: React.FC = () => {
     [data.folders, wsId],
   );
 
-  const parsedList = useMemo(() => (raw.trim() ? parseCurlCommands(raw) : []), [raw]);
+  const parsedList = useMemo(() => (raw.trim() ? parseCurlCommands(raw, lang) : []), [raw, lang]);
   const opts = useMemo(
     () => ({ extractSecrets, extractBaseUrl, groupByHost }),
     [extractSecrets, extractBaseUrl, groupByHost],

@@ -7,8 +7,13 @@
  *  - PowerShell 反引号续行
  *  - 管道（| jq '...'）、export VAR=xxx 赋值、多条命令批量粘贴
  */
-import type { Auth, BodyType } from './types';
+import type { Auth, BodyType, Language } from './types';
 import { appendCurlQuery, parseUrlQuery } from './curlQuery';
+import { inspectJson } from './jsonLiteral';
+import { preprocess, tokenize } from './curlTokenizer';
+import { tr } from './translate';
+
+export { tokenize };
 
 export interface ParsedHeader {
   key: string;
@@ -48,331 +53,6 @@ export interface ParsedCurl {
   warnings: string[];
   /** 原始命令文本 */
   raw: string;
-}
-
-type Token = { type: 'word'; value: string } | { type: 'op'; value: string };
-
-interface TokenizeCtx {
-  envRefs: Set<string>;
-  warnings: string[];
-  cmdMode: boolean;
-}
-
-const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function readVar(input: string, i: number, ctx: TokenizeCtx): { text: string; end: number } | null {
-  // input[i] === '$'
-  const next = input[i + 1];
-  if (next === '{') {
-    const close = input.indexOf('}', i + 2);
-    if (close === -1) return null;
-    const inner = input.slice(i + 2, close);
-    const name = inner.split(/[:\-=?+#%/]/)[0];
-    if (!VAR_NAME.test(name)) return null;
-    ctx.envRefs.add(name);
-    return { text: `{{${name}}}`, end: close + 1 };
-  }
-  if (next && /[A-Za-z_]/.test(next)) {
-    let j = i + 1;
-    while (j < input.length && /[A-Za-z0-9_]/.test(input[j])) j++;
-    const name = input.slice(i + 1, j);
-    ctx.envRefs.add(name);
-    return { text: `{{${name}}}`, end: j };
-  }
-  if (next === '(') {
-    // 命令替换 $(...)，保留原文
-    let depth = 0;
-    let j = i + 1;
-    for (; j < input.length; j++) {
-      if (input[j] === '(') depth++;
-      else if (input[j] === ')') {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
-    const text = input.slice(i, j + 1);
-    ctx.warnings.push(`检测到命令替换 ${text}，已按原文保留，请手动替换为实际值`);
-    return { text, end: j + 1 };
-  }
-  return null;
-}
-
-function readAnsiC(input: string, i: number): { text: string; end: number } {
-  // input[i] === '$', input[i+1] === "'"
-  let j = i + 2;
-  let out = '';
-  while (j < input.length && input[j] !== "'") {
-    const c = input[j];
-    if (c === '\\' && j + 1 < input.length) {
-      const e = input[j + 1];
-      j += 2;
-      switch (e) {
-        case 'n':
-          out += '\n';
-          break;
-        case 't':
-          out += '\t';
-          break;
-        case 'r':
-          out += '\r';
-          break;
-        case '0':
-          out += '\0';
-          break;
-        case 'a':
-          out += '\x07';
-          break;
-        case 'b':
-          out += '\b';
-          break;
-        case 'e':
-        case 'E':
-          out += '\x1b';
-          break;
-        case 'f':
-          out += '\f';
-          break;
-        case 'v':
-          out += '\v';
-          break;
-        case 'x': {
-          const m = /^[0-9a-fA-F]{1,2}/.exec(input.slice(j));
-          if (m) {
-            out += String.fromCharCode(parseInt(m[0], 16));
-            j += m[0].length;
-          } else out += '\\x';
-          break;
-        }
-        case 'u':
-        case 'U': {
-          const m = (e === 'u' ? /^[0-9a-fA-F]{1,4}/ : /^[0-9a-fA-F]{1,8}/).exec(input.slice(j));
-          if (m) {
-            out += String.fromCodePoint(parseInt(m[0], 16));
-            j += m[0].length;
-          } else out += '\\' + e;
-          break;
-        }
-        default:
-          out += e;
-      }
-      continue;
-    }
-    out += c;
-    j++;
-  }
-  return { text: out, end: j + 1 };
-}
-
-export function tokenize(input: string, ctx: TokenizeCtx): Token[] {
-  const tokens: Token[] = [];
-  const n = input.length;
-  let i = 0;
-  let cur = '';
-  let inWord = false;
-  const push = () => {
-    if (inWord) {
-      tokens.push({ type: 'word', value: cur });
-      cur = '';
-      inWord = false;
-    }
-  };
-
-  while (i < n) {
-    const c = input[i];
-
-    // 反斜杠：续行或转义
-    if (c === '\\' && !ctx.cmdMode) {
-      const next = input[i + 1];
-      if (next === '\n') {
-        i += 2;
-        continue;
-      }
-      if (next === '\r' && input[i + 2] === '\n') {
-        i += 3;
-        continue;
-      }
-      if (next === undefined) {
-        i++;
-        continue;
-      }
-      cur += next;
-      inWord = true;
-      i += 2;
-      continue;
-    }
-
-    if (c === "'" && !ctx.cmdMode) {
-      const end = input.indexOf("'", i + 1);
-      inWord = true;
-      if (end === -1) {
-        cur += input.slice(i + 1);
-        ctx.warnings.push('单引号未闭合，已按文本末尾处理');
-        i = n;
-      } else {
-        cur += input.slice(i + 1, end);
-        i = end + 1;
-      }
-      continue;
-    }
-
-    if (c === '$' && input[i + 1] === "'" && !ctx.cmdMode) {
-      const r = readAnsiC(input, i);
-      cur += r.text;
-      inWord = true;
-      i = r.end;
-      continue;
-    }
-
-    if (c === '"') {
-      i++;
-      inWord = true;
-      while (i < n && input[i] !== '"') {
-        const d = input[i];
-        if (d === '\\' && i + 1 < n) {
-          const e = input[i + 1];
-          if (ctx.cmdMode) {
-            if (e === '"' || e === '\\') {
-              cur += e;
-              i += 2;
-              continue;
-            }
-            cur += d;
-            i++;
-            continue;
-          }
-          if (e === '"' || e === '\\' || e === '$' || e === '`') {
-            cur += e;
-            i += 2;
-            continue;
-          }
-          if (e === '\n') {
-            i += 2;
-            continue;
-          }
-          cur += d;
-          i++;
-          continue;
-        }
-        if (d === '$' && !ctx.cmdMode) {
-          const r = readVar(input, i, ctx);
-          if (r) {
-            cur += r.text;
-            i = r.end;
-            continue;
-          }
-        }
-        cur += d;
-        i++;
-      }
-      if (i >= n) ctx.warnings.push('双引号未闭合，已按文本末尾处理');
-      else i++;
-      continue;
-    }
-
-    if (c === '$' && !ctx.cmdMode) {
-      const r = readVar(input, i, ctx);
-      if (r) {
-        cur += r.text;
-        inWord = true;
-        i = r.end;
-        continue;
-      }
-    }
-
-    if (c === ' ' || c === '\t' || c === '\u00a0') {
-      push();
-      i++;
-      continue;
-    }
-    if (c === '\r') {
-      i++;
-      continue;
-    }
-    if (c === '\n') {
-      push();
-      tokens.push({ type: 'op', value: '\n' });
-      i++;
-      continue;
-    }
-    if (c === '#' && !inWord) {
-      while (i < n && input[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '|') {
-      push();
-      if (input[i + 1] === '|') {
-        tokens.push({ type: 'op', value: '||' });
-        i += 2;
-      } else {
-        tokens.push({ type: 'op', value: '|' });
-        i++;
-      }
-      continue;
-    }
-    if (c === '&') {
-      push();
-      if (input[i + 1] === '&') {
-        tokens.push({ type: 'op', value: '&&' });
-        i += 2;
-      } else {
-        tokens.push({ type: 'op', value: '&' });
-        i++;
-      }
-      continue;
-    }
-    if (c === ';') {
-      push();
-      tokens.push({ type: 'op', value: ';' });
-      i++;
-      continue;
-    }
-    if (c === '>' || c === '<') {
-      // 处理 2>&1、>/dev/null、>> 等重定向
-      if (inWord && (cur === '1' || cur === '2')) {
-        cur = '';
-        inWord = false;
-      }
-      push();
-      let j = i + 1;
-      if (input[j] === '>') j++;
-      if (input[j] === '&') {
-        j++;
-        while (j < n && /[0-9-]/.test(input[j])) j++;
-        i = j;
-        continue;
-      }
-      tokens.push({ type: 'op', value: '>' });
-      i = j;
-      continue;
-    }
-    cur += c;
-    inWord = true;
-    i++;
-  }
-  push();
-  return tokens;
-}
-
-/** 预处理：去除提示符、统一换行、处理 cmd / PowerShell 续行 */
-function preprocess(raw: string): { text: string; cmdMode: boolean } {
-  let text = raw.replace(/\r\n?/g, '\n');
-  // 全角/不间断空格等
-  text = text.replace(/[\u2028\u2029]/g, '\n');
-  // AI 有时会给出 “智能引号”
-  text = text.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'");
-  // Markdown 代码块
-  text = text.replace(/^\s*```[a-zA-Z]*\s*$/gm, '');
-  // 行首的 $ 或 > 提示符
-  text = text.replace(/^[ \t]*[$>][ \t]+(?=curl\b)/gm, '');
-  let cmdMode = false;
-  if (/\^\n/.test(text) || /\^"/.test(text)) {
-    cmdMode = true;
-    text = text.replace(/\^\n/g, ' ').replace(/\^(.)/g, '$1');
-  }
-  if (/`\n/.test(text)) {
-    text = text.replace(/`\n/g, ' ');
-  }
-  return { text, cmdMode };
 }
 
 // 带参数的短选项
@@ -527,14 +207,14 @@ function safeDecode(s: string): string {
   }
 }
 
-/** 尽量把 JSON 格式化为 2 空格缩进；含大整数时按词法排版，既美化缩进又避免精度丢失 */
+/** 无法无损序列化时仅调整词法标记之间的空白。 */
 export function prettyJson(text: string): string | null {
   const t = text.trim();
   if (!t || (t[0] !== '{' && t[0] !== '[')) return null;
   try {
-    const v = JSON.parse(t);
-    if (/(?<![\w.])\d{16,}/.test(t)) return formatJsonTokens(t);
-    return JSON.stringify(v, null, 2);
+    const parsed = inspectJson(t);
+    if (!parsed) return null;
+    return parsed.lossless ? JSON.stringify(parsed.value, null, 2) : formatJsonTokens(t);
   } catch {
     return null;
   }
@@ -622,7 +302,9 @@ interface CurlArgsResult {
   parsed: ParsedCurl;
 }
 
-function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues: Record<string, string>, warnings: string[]): CurlArgsResult {
+function parseCurlArgs(
+  args: string[], raw: string, envRefs: string[], envValues: Record<string, string>, warnings: string[], lang: Language,
+): CurlArgsResult {
   let method: string | null = null;
   let url: string | null = null;
   const urlQueries: string[] = [];
@@ -661,7 +343,7 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
         break;
       case 'url-query': {
         if (value === undefined) break;
-        const query = parseUrlQuery(value, warnings);
+        const query = parseUrlQuery(value, warnings, lang);
         if (query !== undefined) urlQueries.push(query);
         break;
       }
@@ -672,7 +354,8 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
         let v = value ?? '';
         if (name !== 'data-raw' && v.startsWith('@')) {
           dataFromFile = true;
-          warnings.push(`请求体引用了本地文件 ${v.slice(1)}，请在“请求体”中手动粘贴文件内容`);
+          warnings.push(tr(lang, `请求体引用了本地文件 ${v.slice(1)}，请在“请求体”中手动粘贴文件内容`,
+            `The body references local file ${v.slice(1)}. Paste its contents into the request body.`));
         }
         if (name === 'data' || name === 'data-ascii') {
           // curl -d 会去掉文件内容中的换行；字面量保持原样
@@ -689,7 +372,8 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
         } else if (eq === 0) {
           dataParts.push(encodeURIComponent(v.slice(1)));
         } else if (at > 0) {
-          warnings.push(`--data-urlencode 引用了本地文件 ${v.slice(at + 1)}`);
+          warnings.push(tr(lang, `--data-urlencode 引用了本地文件 ${v.slice(at + 1)}`,
+            `--data-urlencode references local file ${v.slice(at + 1)}`));
           dataParts.push(v.slice(0, at) + '=');
         } else {
           dataParts.push(encodeURIComponent(v));
@@ -724,7 +408,8 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
             fileName: fileName ?? filePath.split(/[\\/]/).pop(),
             contentType,
           });
-          warnings.push(`表单字段 ${key} 引用了本地文件 ${filePath}，请在“请求体”中重新选择文件`);
+          warnings.push(tr(lang, `表单字段 ${key} 引用了本地文件 ${filePath}，请在“请求体”中重新选择文件`,
+            `Form field ${key} references local file ${filePath}. Select it in the request body.`));
         } else {
           if (name === 'form') {
             // 去掉 ;type=xxx 后缀
@@ -766,7 +451,7 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
       case 'cookie': {
         const v = value ?? '';
         if (v.includes('=')) headers.push({ key: 'Cookie', value: v });
-        else warnings.push(`Cookie 文件 ${v} 无法导入`);
+        else warnings.push(tr(lang, `Cookie 文件 ${v} 无法导入`, `Could not import cookie file ${v}`));
         break;
       }
       case 'insecure':
@@ -785,7 +470,7 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
         proxy = value;
         break;
       case 'aws-sigv4':
-        warnings.push('AWS SigV4 签名暂不支持，请手动配置');
+        warnings.push(tr(lang, 'AWS SigV4 签名暂不支持，请手动配置', 'Configure AWS SigV4 signing manually'));
         break;
       default:
         break;
@@ -825,11 +510,14 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
     }
     // 位置参数 = URL
     if (url === null) url = a;
-    else warnings.push(`忽略多余的参数：${a.length > 60 ? a.slice(0, 60) + '…' : a}`);
+    else {
+      const extra = a.length > 60 ? a.slice(0, 60) + '…' : a;
+      warnings.push(tr(lang, `忽略多余的参数：${extra}`, `Ignored extra argument: ${extra}`));
+    }
   }
 
   if (url === null) {
-    warnings.push('没有找到请求地址 URL');
+    warnings.push(tr(lang, '没有找到请求地址 URL', 'No request URL found'));
     url = '';
   }
   let finalUrl: string = url;
@@ -852,26 +540,22 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
     bodyType = 'multipart';
   } else if (dataParts.length) {
     const ct = (getHeader(headers, 'content-type') ?? '').toLowerCase();
-    const pretty = prettyJson(bodyText);
-    if (jsonMode || ct.includes('json') || (!ct && pretty !== null) || (pretty !== null && !ct.includes('form'))) {
+    const json = /^\s*[{[]/.test(bodyText) ? inspectJson(bodyText) : undefined;
+    if (jsonMode || ct.includes('json') || (json && !ct.includes('form'))) {
       bodyType = 'json';
-      if (pretty !== null) bodyText = pretty;
+      if (json?.lossless) bodyText = JSON.stringify(json.value, null, 2);
       if (jsonMode) {
         if (!getHeader(headers, 'content-type')) headers.push({ key: 'Content-Type', value: 'application/json' });
         if (!getHeader(headers, 'accept')) headers.push({ key: 'Accept', value: 'application/json' });
       }
       // GraphQL 识别
-      try {
-        const obj = JSON.parse(bodyText);
-        if (obj && typeof obj === 'object' && typeof obj.query === 'string' && /graphql/i.test(finalUrl)) {
-          bodyType = 'graphql';
-          graphql = {
-            query: obj.query,
-            variables: obj.variables ? JSON.stringify(obj.variables, null, 2) : '',
-          };
-        }
-      } catch {
-        /* ignore */
+      const obj = json?.lossless ? json.value : null;
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && typeof obj.query === 'string' && /graphql/i.test(finalUrl)) {
+        bodyType = 'graphql';
+        graphql = {
+          query: obj.query,
+          variables: obj.variables ? JSON.stringify(obj.variables, null, 2) : '',
+        };
       }
     } else if (!dataFromFile && (ct.includes('x-www-form-urlencoded') || (!ct && looksLikeForm(bodyText)))) {
       bodyType = 'form';
@@ -891,7 +575,7 @@ function parseCurlArgs(args: string[], raw: string, envRefs: string[], envValues
     }
   } else if (uploadFile) {
     bodyType = 'text';
-    warnings.push(`上传文件 ${uploadFile} 无法自动导入`);
+    warnings.push(tr(lang, `上传文件 ${uploadFile} 无法自动导入`, `Could not automatically import upload file ${uploadFile}`));
   }
 
   let finalMethod: string = method ?? '';
@@ -951,11 +635,11 @@ export function looksLikeCurl(text: string): boolean {
 /**
  * 解析粘贴内容中的所有 cURL 命令
  */
-export function parseCurlCommands(input: string): ParsedCurl[] {
+export function parseCurlCommands(input: string, lang: Language = 'zh'): ParsedCurl[] {
   const { text, cmdMode } = preprocess(input);
   const envRefsGlobal = new Set<string>();
   const globalWarnings: string[] = [];
-  const tokens = tokenize(text, { envRefs: envRefsGlobal, warnings: globalWarnings, cmdMode });
+  const tokens = tokenize(text, { envRefs: envRefsGlobal, warnings: globalWarnings, cmdMode, lang });
 
   // 切分为命令；每条命令再按 | 切分为管道
   type Command = { stages: string[][] };
@@ -1035,7 +719,7 @@ export function parseCurlCommands(input: string): ParsedCurl[] {
     args.forEach(scan);
     const warnings = [...globalWarnings];
     const raw = rawPieces[rawIdx++] ?? input.trim();
-    const { parsed } = parseCurlArgs(args, raw, [...used], { ...envValues }, warnings);
+    const { parsed } = parseCurlArgs(args, raw, [...used], { ...envValues }, warnings, lang);
     for (const stage of c.stages.slice(1)) {
       const cmd = (stage[0] ?? '').split(/[\\/]/).pop();
       if (cmd === 'jq' || cmd === 'jq.exe') {
@@ -1060,6 +744,6 @@ function splitRawCommands(input: string): string[] {
   return starts.map((s, i) => text.slice(s, starts[i + 1] ?? text.length).trim());
 }
 
-export function parseCurl(input: string): ParsedCurl | null {
-  return parseCurlCommands(input)[0] ?? null;
+export function parseCurl(input: string, lang: Language = 'zh'): ParsedCurl | null {
+  return parseCurlCommands(input, lang)[0] ?? null;
 }

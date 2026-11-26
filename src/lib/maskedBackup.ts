@@ -51,10 +51,12 @@ function inspectAuth(auth: Auth, remember: Remember) {
 function inspectJson(text: string | undefined, remember: Remember) {
   if (!text) return;
   try {
-    JSON.parse(text, (key, value) => {
-      if (credentialKey.test(key) && typeof value === 'string') remember(value);
-      return value;
-    });
+    JSON.parse(text);
+    // A reviver would only see the last value of a repeated credential key.
+    const strings = /("(?:\\.|[^"\\])*")(?:\s*:\s*("(?:\\.|[^"\\])*"))?/g;
+    for (const [, key, value] of text.matchAll(strings)) {
+      if (value && credentialKey.test(JSON.parse(key))) remember(JSON.parse(value));
+    }
   } catch { /* Other body formats still receive literal substitutions. */ }
 }
 

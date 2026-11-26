@@ -1,5 +1,7 @@
 import { TEMPLATE_RE } from './template';
 import { splitUrl } from './urlParams';
+import { tr } from './translate';
+import type { Language } from './types';
 
 function encodeLiteral(value: string): string {
   // curl uses '+' for a space, leaves '~' alone, and escapes '*'.
@@ -7,11 +9,12 @@ function encodeLiteral(value: string): string {
     .replace(/%7E/g, '~').replace(/\*/g, '%2A');
 }
 
-export function parseUrlQuery(value: string, warnings: string[]): string | undefined {
+export function parseUrlQuery(value: string, warnings: string[], lang: Language = 'zh'): string | undefined {
   if (value.startsWith('+')) return value.slice(1);
   const eq = value.indexOf('=');
   if (eq < 0 && value.includes('@')) {
-    warnings.push('--url-query 引用了文件或标准输入，已跳过此项，请手动补上查询参数');
+    warnings.push(tr(lang, '--url-query 引用了文件或标准输入，已跳过此项，请手动补上查询参数',
+      '--url-query referenced a file or standard input. Add the skipped query parameter manually.'));
     return undefined;
   }
   const content = value.slice(eq + 1);
@@ -22,7 +25,8 @@ export function parseUrlQuery(value: string, warnings: string[]): string | undef
     offset = match.index + match[0].length;
   }
   if (offset > 0) {
-    warnings.push('--url-query 保留了模板变量。变量值含空格、& 或 # 时，请先对值进行 URL 编码');
+    warnings.push(tr(lang, '--url-query 保留了模板变量。变量值含空格、& 或 # 时，请先对值进行 URL 编码',
+      '--url-query preserved template variables. URL-encode values containing spaces, & or #.'));
   }
   return result + encodeLiteral(content.slice(offset));
 }

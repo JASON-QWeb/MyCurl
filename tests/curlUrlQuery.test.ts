@@ -22,6 +22,7 @@ describe('curl --url-query', () => {
     expect(req.envRefs).toContain('TERM');
     expect(req.warnings.filter((s) => s.includes('文件或标准输入'))).toHaveLength(2);
     expect(req.warnings.some((s) => s.includes('模板变量'))).toBe(true);
+    expect(parseCurl(`curl '${base}' --url-query '@-'`, 'en')!.warnings[0]).toContain('file or standard input');
   });
 
   it('keeps POST data independent and follows curl precedence for --get with data', () => {

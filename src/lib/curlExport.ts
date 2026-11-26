@@ -1,8 +1,10 @@
 /**
  * 导出请求为 cURL / JavaScript fetch / Python requests，以及生成文件夹与工作区 Markdown API 文档
  */
-import type { AppData, Folder, HttpRequest } from './types';
+import type { AppData, Folder, HttpRequest, Language } from './types';
 import { prepareRequest, resolveEffectiveAuth, type PreparedRequest } from './requestRunner';
+import { tr } from './translate';
+import { parseLosslessJson, toPythonLiteral, type JsonValue } from './jsonLiteral';
 import { folderChain, resolveVariables, type VarMap } from './template';
 import { formatTime, maskSecret } from './util';
 
@@ -67,23 +69,62 @@ export function exportAsCurl(data: AppData, req: HttpRequest, opts: CodeGenOptio
   return cmd;
 }
 
+type MultipartBody = Extract<PreparedRequest['body'], { kind: 'multipart' }>;
+
+function snippetHeaders(prep: PreparedRequest, defaultContentType?: string): Record<string, string> {
+  const multipart = prep.body.kind === 'multipart';
+  const headers = Object.fromEntries(prep.headers.filter(([key]) => !multipart || !/^(content-type|content-length)$/i.test(key)));
+  if (defaultContentType && !prep.headers.some(([key]) => key.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = defaultContentType;
+  }
+  return headers;
+}
+
+function jsLiteral(value: JsonValue): string {
+  // "__proto__" has special semantics in an object literal unless it is a computed key.
+  return JSON.stringify(value, null, 2).replace(/^( *)"__proto__":/gm, '$1["__proto__"]:').replace(/\n/g, '\n  ');
+}
+
+function localFilename(fileName?: string): string {
+  return fileName?.split(/[\\/]/).pop() || 'file';
+}
+
+function fetchMultipartBody(body: MultipartBody, lang: Language): string[] {
+  const lines = ['const form = new FormData();'];
+  if (body.fields.some(field => field.isFile)) {
+    lines.push(tr(lang, '// 将 Blob 中的占位注释替换为本地文件内容。', '// Replace each Blob placeholder with the local file contents.'));
+  }
+  for (const field of body.fields) {
+    const name = JSON.stringify(field.name);
+    if (field.isFile) {
+      const filename = localFilename(field.fileName);
+      const commentName = filename.replace(/[\r\n\u2028\u2029]/g, ' ');
+      const comment = tr(lang, `本地文件：${commentName}`, `local file: ${commentName}`);
+      const mime = JSON.stringify(field.contentType || 'application/octet-stream');
+      lines.push(`form.append(${name}, new Blob([/* ${comment} */], { type: ${mime} }), ${JSON.stringify(filename)});`);
+    } else {
+      lines.push(`form.append(${name}, ${JSON.stringify(field.value ?? '')});`);
+    }
+  }
+  return [...lines, ''];
+}
+
 export function exportAsFetch(data: AppData, req: HttpRequest, opts: CodeGenOptions = { secretMode: 'mask' }): string {
   const vars = buildVarMap(data, req, opts.secretMode);
   const prep = prepareRequest(data, req, vars);
-  const headersObj: Record<string, string> = {};
-  for (const [k, v] of prep.headers) headersObj[k] = v;
-  if (prep.body.kind === 'text' && prep.body.contentType && !Object.keys(headersObj).some((k) => k.toLowerCase() === 'content-type')) {
-    headersObj['Content-Type'] = prep.body.contentType;
-  }
-
-  const lines: string[] = [];
+  const headersObj = snippetHeaders(prep, prep.body.kind === 'text' ? prep.body.contentType : undefined);
+  const lines = prep.body.kind === 'multipart' ? fetchMultipartBody(prep.body, data.settings.language) : [];
   lines.push(`const res = await fetch(${JSON.stringify(prep.url)}, {`);
   lines.push(`  method: ${JSON.stringify(prep.method)},`);
   if (Object.keys(headersObj).length) {
-    lines.push(`  headers: ${JSON.stringify(headersObj, null, 2).replace(/\n/g, '\n  ')},`);
+    lines.push(`  headers: ${jsLiteral(headersObj)},`);
   }
   if (prep.body.kind === 'text') {
-    lines.push(`  body: ${JSON.stringify(prep.body.text)},`);
+    const parsed = req.body.type === 'json' ? parseLosslessJson(prep.body.text) : undefined;
+    const body = parsed === undefined ? JSON.stringify(prep.body.text) : `JSON.stringify(${jsLiteral(parsed)})`;
+    lines.push(`  body: ${body},`);
+  } else if (prep.body.kind === 'multipart') {
+    lines.push('  body: form,');
   }
   lines.push(`});`);
   lines.push(`const data = await res.json();`);
@@ -91,16 +132,16 @@ export function exportAsFetch(data: AppData, req: HttpRequest, opts: CodeGenOpti
   return lines.join('\n');
 }
 
-function pythonMultipartBody(body: Extract<PreparedRequest['body'], { kind: 'multipart' }>): string[] {
+function pythonMultipartBody(body: MultipartBody, lang: Language): string[] {
   const lines: string[] = [];
   if (body.fields.some((field) => field.isFile)) {
-    lines.push('# Set each Path to the local file you want to upload.');
+    lines.push(tr(lang, '# 将每个 Path 指向要上传的本地文件。', '# Set each Path to the local file you want to upload.'));
   }
   lines.push('fields = [');
   for (const field of body.fields) {
     const name = JSON.stringify(field.name);
     if (field.isFile) {
-      const filename = JSON.stringify(field.fileName?.split(/[\\/]/).pop() || 'file');
+      const filename = JSON.stringify(localFilename(field.fileName));
       const mime = JSON.stringify(field.contentType || 'application/octet-stream');
       lines.push(`    (${name}, (${filename}, Path(${filename}).read_bytes(), ${mime})),`);
     } else {
@@ -114,15 +155,9 @@ function pythonMultipartBody(body: Extract<PreparedRequest['body'], { kind: 'mul
 export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOptions = { secretMode: 'mask' }): string {
   const vars = buildVarMap(data, req, opts.secretMode);
   const prep = prepareRequest(data, req, vars);
-  if (req.body.type === 'json' && !prep.headers.some(([key]) => key.toLowerCase() === 'content-type')) {
-    prep.headers.push(['Content-Type', 'application/json']);
-  }
-  const headersObj: Record<string, string> = {};
+  const isJson = req.body.type === 'json';
+  const headersObj = snippetHeaders(prep, isJson ? 'application/json' : undefined);
   const multipart = prep.body.kind === 'multipart';
-  for (const [k, v] of prep.headers) {
-    if (multipart && /^(content-type|content-length)$/i.test(k)) continue;
-    headersObj[k] = v;
-  }
 
   const lines: string[] = [];
   if (prep.body.kind === 'multipart') {
@@ -137,12 +172,18 @@ export function exportAsPython(data: AppData, req: HttpRequest, opts: CodeGenOpt
   }
   let bodyArg = '';
   if (prep.body.kind === 'text') {
-    const encoding = req.body.type === 'json' ? '.encode("utf-8")' : '';
-    lines.push(`payload = ${JSON.stringify(prep.body.text)}${encoding}`);
-    bodyArg = ', data=payload';
-  }
-  if (prep.body.kind === 'multipart') {
-    lines.push(...pythonMultipartBody(prep.body));
+    const parsed = isJson ? parseLosslessJson(prep.body.text) : undefined;
+    if (parsed !== undefined) {
+      lines.push(`payload = ${toPythonLiteral(parsed)}`);
+      // Requests treats json=None as an absent body, even for an explicit JSON null.
+      bodyArg = parsed === null ? ', data=b"null", json=payload' : ', json=payload';
+    } else {
+      const encoding = isJson ? '.encode("utf-8")' : '';
+      lines.push(`payload = ${JSON.stringify(prep.body.text)}${encoding}`);
+      bodyArg = ', data=payload';
+    }
+  } else if (prep.body.kind === 'multipart') {
+    lines.push(...pythonMultipartBody(prep.body, data.settings.language));
     bodyArg = ', data=payload';
   }
   const hArg = hasHeaders ? ', headers=headers' : '';

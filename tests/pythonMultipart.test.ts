@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { exportAsPython } from '../src/lib/curlExport';
+import { exportAsFetch, exportAsPython } from '../src/lib/curlExport';
+import { runInNewContext } from 'node:vm';
 import { emptyBody, newRequest, seedData } from '../src/lib/factory';
 import type { MultipartField } from '../src/lib/types';
 
-function generate(fields: MultipartField[]) {
+function generate(fields: MultipartField[], exporter = exportAsPython) {
   const data = seedData();
+  data.settings.language = 'en';
   const req = newRequest(data.workspaces[0].id, null, {
     method: 'POST',
     url: 'http://localhost/upload',
@@ -15,7 +17,7 @@ function generate(fields: MultipartField[]) {
     ],
     body: { ...emptyBody(), type: 'multipart', multipart: fields },
   });
-  return exportAsPython(data, req);
+  return exporter(data, req);
 }
 
 describe('Python multipart export', () => {
@@ -47,5 +49,38 @@ describe('Python multipart export', () => {
     expect(script).toContain('fields = [\n]');
     expect(script).toContain('encode_multipart_formdata(fields)');
     expect(script).not.toContain('pathlib');
+  });
+});
+
+describe('Fetch multipart export', () => {
+  it('sends ordered FormData and lets fetch generate the multipart headers', async () => {
+    const script = generate([
+      { id: '1', enabled: true, key: 'part', value: 'first\n"你好"' },
+      { id: '2', enabled: true, key: 'part', value: '', isFile: true, fileName: 'dir/README.md', contentType: 'text/markdown', fileData: 'eA==' },
+      { id: '3', enabled: false, key: 'disabled', value: 'omit' },
+      { id: '4', enabled: true, key: 'part', value: '' },
+    ], exportAsFetch);
+    expect(script).toContain('new Blob([/* local file: README.md */], { type: "text/markdown" })');
+    expect(script).not.toMatch(/dir\/README|eA==|boundary=stale|content-type|content-length/i);
+    const capture = { headers: {}, body: new FormData() };
+    await runInNewContext(`(async () => { ${script} })()`, {
+      FormData, Blob, console: { log() {} },
+      fetch: (_url: string, init: RequestInit) => {
+        Object.assign(capture, init);
+        return { json: () => null };
+      },
+    });
+    expect(capture.headers).toEqual({ Accept: 'application/json' });
+    expect([...capture.body.keys()]).toEqual(['part', 'part', 'part']);
+    expect(capture.body.getAll('part')).toEqual([
+      'first\n"你好"', expect.objectContaining({ name: 'README.md', type: 'text/markdown' }), '',
+    ]);
+  });
+
+  it('emits an empty FormData for an empty multipart request', () => {
+    const script = generate([], exportAsFetch);
+    expect(script).toContain('const form = new FormData();');
+    expect(script).toContain('body: form,');
+    expect(script).not.toContain('form.append');
   });
 });

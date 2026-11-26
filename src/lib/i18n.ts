@@ -1,17 +1,13 @@
 import { useAppStore } from '../store/useAppStore';
 import type { Language } from './types';
+import { tr } from './translate';
 
-export type { Language };
-
-/** 纯函数双语选择，适合 store 或非组件模块使用 */
-export function tr(lang: Language | undefined, zh: string, en: string): string {
-  return lang === 'en' ? en : zh;
-}
+export { tr, type Language };
 
 /** React 组件双语 Hook */
 export function useI18n() {
   const lang: Language = useAppStore((s) => s.data.settings.language ?? 'zh');
   const isEn = lang === 'en';
-  const t = (zh: string, en: string) => (isEn ? en : zh);
+  const t = (zh: string, en: string) => tr(lang, zh, en);
   return { lang, isEn, t };
 }
