@@ -33,8 +33,8 @@ export function isMyCurlBackup(obj: any): boolean {
   return !!(obj && typeof obj === 'object' && Array.isArray(obj.workspaces) && Array.isArray(obj.requests));
 }
 
-function mapPostmanAuth(a: any): Auth {
-  if (!a || !a.type || a.type === 'noauth' || a.type === 'none') return { type: 'inherit' };
+function mapCollectionAuth(a: any): Auth {
+  if (!a?.type) return { type: 'inherit' };
   const map = (val: any): Record<string, any> => {
     if (Array.isArray(val)) return Object.fromEntries(val.map((x) => [x.key, x.value]));
     if (val && typeof val === 'object') return val;
@@ -53,6 +53,10 @@ function mapPostmanAuth(a: any): Auth {
     return { type: 'apikey', key: String(m.key ?? ''), value: String(m.value ?? ''), in: m.in === 'query' ? 'query' : 'header' };
   }
   return { type: 'inherit' };
+}
+
+function mapPostmanAuth(a: any): Auth {
+  return a?.type === 'noauth' ? { type: 'none' } : mapCollectionAuth(a);
 }
 
 /** 将 Postman v2.1 集合导入到指定工作区 */
@@ -266,7 +270,7 @@ export function importApifoxCollection(
             params,
             headers,
             body,
-            auth: mapPostmanAuth(api.auth),
+            auth: mapCollectionAuth(api.auth),
             description: typeof api.description === 'string' ? api.description : '',
             sortOrder: order++,
           }),
@@ -275,7 +279,7 @@ export function importApifoxCollection(
         const fld = newFolder(workspaceId, parentId, {
           name: String(item.name || '未命名文件夹'),
           description: typeof item.description === 'string' ? item.description : '',
-          auth: mapPostmanAuth(item.auth),
+          auth: mapCollectionAuth(item.auth),
           sortOrder: order++,
         });
         newFolders.push(fld);
