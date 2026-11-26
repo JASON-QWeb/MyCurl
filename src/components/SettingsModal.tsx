@@ -9,6 +9,7 @@ import {
   isMyCurlBackup,
   isPostmanCollection,
 } from '../lib/collectionIO';
+import { readPostmanEnvironment } from '../lib/postmanEnvironment';
 import { parseCurlCommands } from '../lib/curlParser';
 import { useI18n, type Language } from '../lib/i18n';
 import type { CurlCopySecretMode } from '../lib/types';
@@ -23,6 +24,7 @@ export const SettingsModal: React.FC = () => {
     updateSettings,
     updateImportSettings,
     replaceData,
+    mutate,
     applyBatchImport,
     confirm,
     toast,
@@ -70,6 +72,17 @@ export const SettingsModal: React.FC = () => {
         setSettingsModal(false);
         return;
       }
+      if (json?._postman_variable_scope === 'environment') {
+        const env = readPostmanEnvironment(json, wsId);
+        if (!env) {
+          toast(t('Postman 环境文件格式无效，请检查环境名称与变量列表', 'Invalid Postman environment name or variable list'), 'error');
+          return;
+        }
+        mutate((current) => ({ ...current, environments: [...current.environments, env] }), true);
+        toast(t(`已导入环境「${env.name}」，可在环境菜单中选用`, `Imported ${env.name}. Select it in the environment menu.`), 'success');
+        setSettingsModal(false);
+        return;
+      }
       if (isPostmanCollection(json)) {
         const res = importPostmanCollection(data, wsId, json);
         replaceData(res.data);
@@ -110,8 +123,8 @@ export const SettingsModal: React.FC = () => {
     }
     toast(
       t(
-        '未识别的文件格式（支持 Apifox JSON、Postman v2.1 JSON、MyCurl 备份或 cURL 文本）',
-        'Unrecognized file format (supports Apifox JSON, Postman v2.1 JSON, MyCurl backup, or cURL text)',
+        '未识别的文件格式（支持 Apifox JSON、Postman 集合或环境、MyCurl 备份或 cURL 文本）',
+        'Unrecognized file format (supports Apifox JSON, Postman collections or environments, MyCurl backup, or cURL text)',
       ),
       'error',
     );
