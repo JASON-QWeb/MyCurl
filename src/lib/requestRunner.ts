@@ -265,6 +265,17 @@ export async function executeRequest(
     return { ...record, error: '请输入请求 URL' };
   }
 
+  if (prepared.body.kind === 'multipart') {
+    const missingFiles = prepared.body.fields.filter((field) => field.isFile && field.data == null);
+    if (missingFiles.length) {
+      const fields = missingFiles.map((field) => field.name).join(', ');
+      const error = data.settings.language === 'en'
+        ? `Select a local file before sending. Multipart fields: ${fields}`
+        : `请先选择要上传的本地文件。缺少附件的表单字段：${fields}`;
+      return { ...record, error };
+    }
+  }
+
   const textDecoder = new TextDecoder('utf-8', { fatal: false });
   const binChunks: Uint8Array[] = [];
   let binSize = 0;
