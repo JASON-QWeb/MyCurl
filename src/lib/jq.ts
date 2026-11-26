@@ -4,7 +4,7 @@
  *      比较 == != < <= > >=、and or not、+ - * /、字面量
  *      函数：length keys values map select has type first last add tostring tonumber
  *            to_entries from_entries join split ascii_downcase ascii_upcase test contains
- *            sort sort_by reverse unique min max flatten any all empty fromjson tojson
+ *            sort sort_by group_by reverse unique min max flatten any all empty fromjson tojson
  *            startswith endswith ltrimstr rtrimstr .. (递归)
  * 也支持简单 JSONPath：$.a.b[0]、$.items[*].name
  */
@@ -324,6 +324,55 @@ function cmp(a: unknown, b: unknown): number {
   return JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0;
 }
 
+/** jq orders strings by Unicode code point, arrays by element, and objects by their keys first. */
+function compareGroupKeys(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (typeof a === 'string' && typeof b === 'string') {
+    let i = 0;
+    while (i < a.length && i < b.length) {
+      const code = a.codePointAt(i)!;
+      const diff = code - b.codePointAt(i)!;
+      if (diff !== 0) return diff;
+      i += code > 0xffff ? 2 : 1;
+    }
+    return a.length - b.length;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const diff = compareGroupKeys(a[i], b[i]);
+      if (diff !== 0) return diff;
+    }
+    return a.length - b.length;
+  }
+  if (typeOf(a) === 'object' && typeOf(b) === 'object') {
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left).sort(compareGroupKeys);
+    const keyDiff = compareGroupKeys(keys, Object.keys(right).sort(compareGroupKeys));
+    if (keyDiff !== 0) return keyDiff;
+    for (const key of keys) {
+      const diff = compareGroupKeys(left[key], right[key]);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+  return cmp(a, b);
+}
+
+function groupBy(input: unknown, keyFilter: Node): unknown[][] {
+  if (!Array.isArray(input)) throw new Error('group_by 需要数组');
+  const rows = input.map(value => ({ value, key: evalNode(keyFilter, value) }));
+  rows.sort((a, b) => compareGroupKeys(a.key, b.key));
+  const groups: unknown[][] = [];
+  let previous: unknown[] | undefined;
+  for (const { key, value } of rows) {
+    if (!previous || compareGroupKeys(previous, key) !== 0) groups.push([]);
+    groups[groups.length - 1].push(value);
+    previous = key;
+  }
+  return groups;
+}
+
 function deepEqual(a: unknown, b: unknown) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -595,15 +644,9 @@ function callFn(name: string, args: Node[], input: unknown): unknown[] {
       return [[...(input as unknown[])].sort(cmp)];
     case 'sort_by':
       return [[...(input as unknown[])].sort((a, b) => cmp(arg(0, a)[0], arg(0, b)[0]))];
-    case 'group_by': {
-      const groups = new Map<string, unknown[]>();
-      for (const x of input as unknown[]) {
-        const k = JSON.stringify(arg(0, x)[0]);
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(x);
-      }
-      return [[...groups.values()]];
-    }
+    case 'group_by':
+      if (args.length !== 1) throw new Error('group_by 需要一个筛选表达式');
+      return [groupBy(input, args[0])];
     case 'reverse':
       return [typeof input === 'string' ? [...input].reverse().join('') : [...(input as unknown[])].reverse()];
     case 'unique': {
