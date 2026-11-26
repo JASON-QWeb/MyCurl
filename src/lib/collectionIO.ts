@@ -3,22 +3,11 @@
  */
 import type { AppData, Auth, Environment, Folder, HttpRequest, KV, Variable } from './types';
 import { emptyBody, newEnvironment, newFolder, newRequest, normalizeData } from './factory';
-import { maskSecret, uid } from './util';
+import { uid } from './util';
+import { maskedBackupJson } from './maskedBackup';
 
 export function exportMyCurlJson(data: AppData, maskSecrets: boolean): string {
-  if (!maskSecrets) return JSON.stringify(data, null, 2);
-  const copy: AppData = JSON.parse(JSON.stringify(data));
-  for (const f of copy.folders) {
-    for (const v of f.variables) {
-      if (v.secret && v.value) v.value = maskSecret(v.value);
-    }
-  }
-  for (const e of copy.environments) {
-    for (const v of e.variables) {
-      if (v.secret && v.value) v.value = maskSecret(v.value);
-    }
-  }
-  return JSON.stringify(copy, null, 2);
+  return maskSecrets ? maskedBackupJson(data) : JSON.stringify(data, null, 2);
 }
 
 export function isPostmanCollection(obj: any): boolean {
