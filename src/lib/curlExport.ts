@@ -12,7 +12,7 @@ export interface CodeGenOptions {
   includeJq?: boolean;
 }
 
-function buildVarMap(data: AppData, req: HttpRequest, mode: CodeGenOptions['secretMode']): VarMap {
+export function buildVarMap(data: AppData, req: HttpRequest, mode: CodeGenOptions['secretMode']): VarMap {
   const real = resolveVariables(data, req.workspaceId, req.folderId);
   if (mode === 'resolve') return real;
   const next: VarMap = new Map();

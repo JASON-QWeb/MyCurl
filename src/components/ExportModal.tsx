@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { exportAsCurl, exportAsFetch, exportAsPython, generateRequestDoc, type CodeGenOptions } from '../lib/curlExport';
+import { exportHttpFile } from '../lib/httpFileExport';
 import { copyText } from '../lib/util';
 import { useI18n } from '../lib/i18n';
 import { IconCode, IconCopy, IconX } from './Icons';
@@ -9,7 +10,7 @@ export const ExportModal: React.FC = () => {
   const { data, exportModal, setExportModal, toast } = useAppStore();
   const { t } = useI18n();
   const defaultSecretMode = data.settings.curlCopySecretMode ?? 'mask';
-  const [lang, setLang] = useState<'curl' | 'fetch' | 'python' | 'markdown'>('curl');
+  const [lang, setLang] = useState<'curl' | 'fetch' | 'python' | 'http' | 'markdown'>('curl');
   const [secretMode, setSecretMode] = useState<CodeGenOptions['secretMode']>(defaultSecretMode);
   const [includeJq, setIncludeJq] = useState(true);
 
@@ -21,14 +22,19 @@ export const ExportModal: React.FC = () => {
 
   const req = exportModal ? data.requests.find((r) => r.id === exportModal.requestId) : null;
 
+  const http = useMemo(
+    () => req && lang === 'http' ? exportHttpFile(data, req, { secretMode }) : null,
+    [data, req, lang, secretMode],
+  );
   const output = useMemo(() => {
     if (!req) return '';
     const opts: CodeGenOptions = { secretMode, includeJq };
     if (lang === 'curl') return exportAsCurl(data, req, opts);
     if (lang === 'fetch') return exportAsFetch(data, req, opts);
     if (lang === 'python') return exportAsPython(data, req, opts);
+    if (lang === 'http') return http?.text ?? '';
     return generateRequestDoc(data, req);
-  }, [data, req, lang, secretMode, includeJq]);
+  }, [data, req, lang, secretMode, includeJq, http]);
 
   if (!req) return null;
 
@@ -62,6 +68,9 @@ export const ExportModal: React.FC = () => {
               <button className={lang === 'python' ? 'active' : ''} onClick={() => setLang('python')}>
                 Python requests
               </button>
+              <button className={lang === 'http' ? 'active' : ''} onClick={() => setLang('http')}>
+                .http
+              </button>
               <button className={lang === 'markdown' ? 'active' : ''} onClick={() => setLang('markdown')}>
                 {t('Markdown 文档', 'Markdown')}
               </button>
@@ -94,7 +103,11 @@ export const ExportModal: React.FC = () => {
           </div>
 
           <pre className="md-pre" style={{ margin: 0, maxHeight: 400, userSelect: 'all' }}>
-            <code>{output}</code>
+            <code>{http?.error === 'multipart'
+              ? t('multipart 请求请使用 cURL 导出。', 'Use cURL to export multipart requests.')
+              : http?.error === 'syntax'
+                ? t('此请求无法表示为单条 .http 请求，请使用 cURL 导出。', 'This request cannot be represented as a single .http request. Use cURL to export it.')
+                : output}</code>
           </pre>
         </div>
 
@@ -110,6 +123,7 @@ export const ExportModal: React.FC = () => {
             </button>
             <button
               className="btn btn-primary"
+              disabled={!!http?.error}
               onClick={() => {
                 copyText(output);
                 toast(t('已复制到剪贴板', 'Copied to clipboard'), 'success');
