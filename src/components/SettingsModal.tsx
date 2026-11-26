@@ -11,7 +11,13 @@ import {
 } from '../lib/collectionIO';
 import { parseCurlCommands } from '../lib/curlParser';
 import { useI18n, type Language } from '../lib/i18n';
-import type { CurlCopySecretMode } from '../lib/types';
+import { importHarArchive, isHarArchive } from '../lib/harImport';
+import { importHttpFile, looksLikeHttpFile } from '../lib/httpFileImport';
+import { importOpenApiDocument, isOpenApiDocument } from '../lib/openapiImport';
+import { downloadPostmanCollection } from '../lib/postmanExport';
+import { hasMaskedSecrets } from '../lib/maskedBackup';
+import { downloadJsonFile } from '../lib/util';
+import type { AppData, CurlCopySecretMode } from '../lib/types';
 import { IconDownload, IconSettings, IconUpload, IconX } from './Icons';
 
 export const SettingsModal: React.FC = () => {
@@ -39,12 +45,7 @@ export const SettingsModal: React.FC = () => {
 
   const downloadJson = (maskSecrets: boolean) => {
     const content = exportMyCurlJson(data, maskSecrets);
-    const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `mycurl-backup${maskSecrets ? '-masked' : ''}-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadJsonFile(content, `mycurl-backup${maskSecrets ? '-masked' : ''}-${new Date().toISOString().slice(0, 10)}.json`);
     toast(
       maskSecrets
         ? t('已导出脱敏备份 JSON', 'Exported masked backup JSON')
@@ -53,73 +54,65 @@ export const SettingsModal: React.FC = () => {
     );
   };
 
+  const finishImport = (format: string, result: { data: AppData; folderCount: number; requestCount: number }) => {
+    replaceData(result.data);
+    toast(t(
+      `已导入 ${format}：${result.folderCount} 个目录，${result.requestCount} 条请求`,
+      `Imported ${format}: ${result.folderCount} folders, ${result.requestCount} requests`,
+    ), 'success');
+    setSettingsModal(false);
+  };
+
+  const restoreBackup = async (backup: AppData) => {
+    const note = hasMaskedSecrets(backup) ? t('备份中已脱敏的密钥需要重新填写。', ' Masked secrets in this backup must be re-entered.') : '';
+    const ok = await confirm({
+      title: t('恢复 MyCurl 备份', 'Restore MyCurl Backup'),
+      message: t('导入 MyCurl 备份将替换当前全部工作区数据，是否继续？',
+        'Importing a MyCurl backup will replace all current workspace data. Continue?') + note,
+      confirmLabel: t('继续恢复', 'Restore'), danger: true,
+    });
+    if (ok) {
+      replaceData(backup);
+      toast(t('已恢复 MyCurl 备份数据', 'Restored MyCurl backup'), 'success');
+      setSettingsModal(false);
+    }
+  };
+
   const handleFileImport = async (file: File | null) => {
     if (!file) return;
-    const text = await file.text();
     try {
-      const json = JSON.parse(text);
-      if (isApifoxCollection(json)) {
-        const res = importApifoxCollection(data, wsId, json);
-        replaceData(res.data);
-        toast(
-          t(
-            `已导入 Apifox 集合：${res.folderCount} 个目录，${res.requestCount} 条请求`,
-            `Imported Apifox collection: ${res.folderCount} folders, ${res.requestCount} requests`,
-          ),
-          'success',
-        );
-        setSettingsModal(false);
-        return;
+      const text = (await file.text()).replace(/^\uFEFF/, '');
+      const current = useAppStore.getState().data;
+      let json;
+      try { json = JSON.parse(text); } catch { /* Try the text formats below. */ }
+      if (json !== undefined) {
+        if (isApifoxCollection(json)) return finishImport(t('Apifox 集合', 'Apifox collection'), importApifoxCollection(current, wsId, json));
+        if (json?._postman_variable_scope === 'environment') {
+          if (importPostmanEnvironment(json, wsId)) setSettingsModal(false);
+          return;
+        }
+        if (isPostmanCollection(json)) return finishImport(t('Postman 集合', 'Postman collection'), importPostmanCollection(current, wsId, json));
+        if (isOpenApiDocument(json)) return finishImport(json.swagger === '2.0' ? 'Swagger' : 'OpenAPI', importOpenApiDocument(current, wsId, json));
+        if (isHarArchive(json)) {
+          const result = importHarArchive(current, wsId, json, current.settings.import);
+          if (result.requestCount) finishImport('HAR', result);
+          else toast(t('HAR 中没有 HTTP(S) 请求', 'The HAR contains no HTTP(S) requests'), 'error');
+          return;
+        }
+        if (isMyCurlBackup(json)) return await restoreBackup(importMyCurlBackup(json));
+      } else {
+        const curls = parseCurlCommands(text, current.settings.language);
+        if (curls.length) {
+          applyBatchImport(curls);
+          setSettingsModal(false);
+          return;
+        }
+        if (looksLikeHttpFile(text)) return finishImport(t('HTTP 文件', 'HTTP file'), importHttpFile(current, wsId, text, file.name.replace(/\.[^.]+$/, '')));
       }
-      if (json?._postman_variable_scope === 'environment') {
-        if (importPostmanEnvironment(json, wsId)) setSettingsModal(false);
-        return;
-      }
-      if (isPostmanCollection(json)) {
-        const res = importPostmanCollection(data, wsId, json);
-        replaceData(res.data);
-        toast(
-          t(
-            `已导入 Postman 集合：${res.folderCount} 个目录，${res.requestCount} 条请求`,
-            `Imported Postman collection: ${res.folderCount} folders, ${res.requestCount} requests`,
-          ),
-          'success',
-        );
-        setSettingsModal(false);
-        return;
-      }
-      if (isMyCurlBackup(json)) {
-        const ok = await confirm({
-          title: t('恢复 MyCurl 备份', 'Restore MyCurl Backup'),
-          message: t(
-            '导入 MyCurl 备份将替换当前全部工作区数据，是否继续？',
-            'Importing a MyCurl backup will replace all current workspace data. Continue?',
-          ),
-          confirmLabel: t('继续恢复', 'Restore'),
-          danger: true,
-        });
-        if (!ok) return;
-        replaceData(importMyCurlBackup(json));
-        toast(t('已恢复 MyCurl 备份数据', 'Restored MyCurl backup'), 'success');
-        setSettingsModal(false);
-        return;
-      }
+      toast(t('未识别的文件格式', 'Unrecognized file format'), 'error');
     } catch {
-      /* 尝试按 cURL 文本文件导入 */
+      toast(t('无法导入文件，请检查文件内容。', 'Could not import the file. Check its contents.'), 'error');
     }
-    const curls = parseCurlCommands(text, s.language);
-    if (curls.length > 0) {
-      applyBatchImport(curls);
-      setSettingsModal(false);
-      return;
-    }
-    toast(
-      t(
-        '未识别的文件格式（支持 Apifox JSON、Postman 集合或环境、MyCurl 备份或 cURL 文本）',
-        'Unrecognized file format (supports Apifox JSON, Postman collections or environments, MyCurl backup, or cURL text)',
-      ),
-      'error',
-    );
   };
 
   return (
@@ -318,7 +311,7 @@ export const SettingsModal: React.FC = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".json,.txt,.sh,.curl"
+                accept=".json,.har,.http,.rest,.txt,.sh,.curl"
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   handleFileImport(e.target.files?.[0] ?? null);
@@ -327,7 +320,7 @@ export const SettingsModal: React.FC = () => {
               />
               <button className="btn" onClick={() => fileInputRef.current?.click()}>
                 <IconUpload size={13} />
-                {t('导入 Apifox / Postman / 备份 / cURL', 'Import Apifox / Postman / Backup / cURL')}
+                {t('导入集合 / 备份 / 文件', 'Import Collection / Backup / File')}
               </button>
               <button className="btn" onClick={() => downloadJson(true)}>
                 <IconDownload size={13} />
@@ -337,7 +330,15 @@ export const SettingsModal: React.FC = () => {
                 <IconDownload size={13} />
                 {t('导出完整备份（含密钥）', 'Export Full Backup')}
               </button>
+              <button className="btn" onClick={() => downloadPostmanCollection(data, wsId)}>
+                <IconDownload size={13} />
+                {t('导出 Postman 集合（脱敏）', 'Export Postman (Masked)')}
+              </button>
             </div>
+            <small style={{ display: 'block', marginTop: 8, color: 'var(--text-muted)' }}>
+              {t('支持 OpenAPI · Postman · Apifox · HAR · .http · MyCurl 备份 · cURL',
+                'Supports OpenAPI, Postman, Apifox, HAR, .http, MyCurl Backup, cURL')}
+            </small>
           </div>
         </div>
 

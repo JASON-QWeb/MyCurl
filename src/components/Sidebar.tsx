@@ -3,6 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import type { Folder, HttpRequest } from '../lib/types';
 import { copyText, methodColor, methodShort } from '../lib/util';
 import { exportAsCurl } from '../lib/curlExport';
+import { downloadPostmanCollection } from '../lib/postmanExport';
 import { filterSidebarTree, parseRequestSearch } from '../lib/requestSearch';
 import { useI18n } from '../lib/i18n';
 import {
@@ -499,7 +500,7 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
           className="ctx-menu"
           style={{
             left: Math.min(ctx.x, window.innerWidth - 190),
-            top: Math.min(ctx.y, window.innerHeight - 240),
+            top: Math.max(0, Math.min(ctx.y, window.innerHeight - (ctxFolder ? 270 : 240))),
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -612,6 +613,12 @@ export const Sidebar: React.FC<{ width: number }> = ({ width }) => {
                 }}
               >
                 <span>{t('导出 Markdown 文档…', 'Export Markdown Docs…')}</span>
+              </button>
+              <button className="menu-item" onClick={() => {
+                downloadPostmanCollection(data, wsId, ctxFolder.id);
+                setCtx(null);
+              }}>
+                <span>{t('导出 Postman 集合…', 'Export Postman Collection…')}</span>
               </button>
               <div className="menu-sep" />
               <button

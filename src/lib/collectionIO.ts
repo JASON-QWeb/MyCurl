@@ -3,7 +3,8 @@
  */
 import type { AppData, Auth, Environment, Folder, HttpRequest, KV, Variable } from './types';
 import { emptyBody, newEnvironment, newFolder, newRequest, normalizeData } from './factory';
-import { uid } from './util';
+import { isRecord, kv, uid } from './util';
+import { tr } from './translate';
 import { maskedBackupJson } from './maskedBackup';
 
 export function exportMyCurlJson(data: AppData, maskSecrets: boolean): string {
@@ -45,7 +46,23 @@ function mapCollectionAuth(a: any): Auth {
 }
 
 function mapPostmanAuth(a: any): Auth {
-  return a?.type === 'noauth' ? { type: 'none' } : mapCollectionAuth(a);
+  if (a?.type === 'noauth') return { type: 'none' };
+  const auth = mapCollectionAuth(a);
+  const prefix = a?.['x-mycurl-bearer-prefix'];
+  if (auth.type === 'apikey' && auth.in === 'header' && auth.key?.toLowerCase() === 'authorization' && typeof prefix === 'string') {
+    const start = prefix ? prefix + ' ' : '';
+    if (auth.value?.startsWith(start)) return { type: 'bearer', prefix, token: auth.value.slice(start.length) };
+  }
+  return auth;
+}
+
+function postmanVariables(list: unknown): Variable[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter(isRecord).map(v => ({
+    ...kv(String(v.key ?? ''), String(v.value ?? ''), !v.disabled),
+    secret: v['x-mycurl-secret'] === true || v.type === 'secret' || /key|token|secret|pass/i.test(String(v.key ?? '')),
+    note: typeof v.description === 'string' ? v.description : undefined,
+  }));
 }
 
 /** 将 Postman v2.1 集合导入到指定工作区 */
@@ -56,18 +73,13 @@ export function importPostmanCollection(
 ): { data: AppData; folderCount: number; requestCount: number } {
   const newFolders: Folder[] = [];
   const newRequests: HttpRequest[] = [];
-  const rootName = collection.info?.name || 'Postman 导入';
+  const lang = data.settings.language;
+  const rootName = collection.info?.name || tr(lang, 'Postman 导入', 'Postman Import');
   const rootFolder = newFolder(workspaceId, null, {
     name: rootName,
     description: typeof collection.info?.description === 'string' ? collection.info.description : collection.info?.description?.content || '',
     auth: mapPostmanAuth(collection.auth),
-    variables: (collection.variable || []).map((v: any) => ({
-      id: uid('kv_'),
-      key: String(v.key ?? ''),
-      value: String(v.value ?? ''),
-      enabled: !v.disabled,
-      secret: /key|token|secret|pass/i.test(String(v.key ?? '')),
-    })),
+    variables: postmanVariables(collection.variable),
   });
   newFolders.push(rootFolder);
 
@@ -76,7 +88,8 @@ export function importPostmanCollection(
     for (const item of items || []) {
       if (Array.isArray(item.item)) {
         const fld = newFolder(workspaceId, parentId, {
-          name: item.name || '未命名文件夹',
+          name: item.name || tr(lang, '未命名文件夹', 'Untitled Folder'),
+          variables: postmanVariables(item.variable),
           description: typeof item.description === 'string' ? item.description : item.description?.content || '',
           auth: mapPostmanAuth(item.auth),
           sortOrder: order++,
@@ -114,6 +127,7 @@ export function importPostmanCollection(
             enabled: !f.disabled,
             isFile: f.type === 'file',
             fileName: f.type === 'file' ? String(f.src ?? '') : undefined,
+            contentType: typeof f.contentType === 'string' ? f.contentType : undefined,
           }));
         } else if (r.body?.mode === 'graphql') {
           body.type = 'graphql';
@@ -124,7 +138,7 @@ export function importPostmanCollection(
         }
         newRequests.push(
           newRequest(workspaceId, parentId, {
-            name: item.name || '未命名请求',
+            name: item.name || tr(lang, '未命名请求', 'Untitled Request'),
             method: String(r.method || 'GET').toUpperCase(),
             url: rawUrl,
             params,

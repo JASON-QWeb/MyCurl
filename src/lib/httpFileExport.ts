@@ -28,7 +28,7 @@ export function exportHttpFile(data: AppData, req: HttpRequest, opts: CodeGenOpt
   let url = prep.url;
   if (template && req.url.trimStart().startsWith('{{')) {
     const resolved = render(req.url, resolveVariables(data, req.workspaceId, req.folderId));
-    if (/^https?:\/\//i.test(resolved.trim())) url = url.replace(/^https:\/\/(?=\{\{)/, '');
+    if (/^(?:https?:\/\/|\{\{)/i.test(resolved.trim())) url = url.replace(/^https:\/\/(?=\{\{)/, '');
   }
   if (template && auth.type === 'apikey' && auth.in === 'query') {
     const hashAt = url.indexOf('#');

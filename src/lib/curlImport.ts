@@ -8,10 +8,11 @@
  *  - 自动生成请求名称与文档（原始命令已脱敏）
  */
 import type { ParsedCurl } from './curlParser';
-import type { AppData, Auth, Folder, HttpRequest, KV, Variable } from './types';
+import type { AppData, Auth, Folder, HttpRequest, KV, Language, Variable } from './types';
 import { emptyBody, newFolder, newRequest } from './factory';
 import { folderChain, SECRET_NAME_RE } from './template';
 import { formatTime, maskSecret, uid } from './util';
+import { tr } from './translate';
 import { parseQuery, splitUrl } from './urlParams';
 
 export interface ImportOptions {
@@ -61,67 +62,81 @@ const SECRET_HEADER_RE =
   /^(x-)?(api[-_]?key|apikey|api[-_]?token|access[-_]?token|auth[-_]?token|token|secret|secret[-_]?key|client[-_]?secret|goog-api-key|subscription-key)$|^ocp-apim-subscription-key$|^x-goog-api-key$|^x-auth-key$|^private-token$/i;
 const SECRET_QUERY_RE = /^(key|api[-_]?key|apikey|access[-_]?token|token|secret|client[-_]?secret|auth|sig|signature|private[-_]?token)$/i;
 
-const KNOWN_HOSTS: [RegExp, string][] = [
+const KNOWN_HOSTS: [RegExp, string, string?][] = [
   [/(^|\.)openai\.com$/, 'OpenAI'],
   [/(^|\.)anthropic\.com$/, 'Anthropic Claude'],
   [/^generativelanguage\.googleapis\.com$/, 'Google Gemini'],
   [/aiplatform\.googleapis\.com$/, 'Vertex AI'],
   [/(^|\.)deepseek\.com$/, 'DeepSeek'],
-  [/^dashscope(-intl)?\.aliyuncs\.com$/, '通义千问 DashScope'],
-  [/^open\.bigmodel\.cn$/, '智谱 GLM'],
+  [/^dashscope(-intl)?\.aliyuncs\.com$/, '通义千问 DashScope', 'DashScope'],
+  [/^open\.bigmodel\.cn$/, '智谱 GLM', 'Zhipu GLM'],
   [/(^|\.)moonshot\.(cn|ai)$/, 'Moonshot Kimi'],
-  [/volces\.com$/, '火山方舟 豆包'],
-  [/(^|\.)siliconflow\.(cn|com)$/, '硅基流动'],
+  [/volces\.com$/, '火山方舟 豆包', 'Volcengine Doubao'],
+  [/(^|\.)siliconflow\.(cn|com)$/, '硅基流动', 'SiliconFlow'],
   [/^openrouter\.ai$/, 'OpenRouter'],
   [/(^|\.)groq\.com$/, 'Groq'],
   [/(^|\.)mistral\.ai$/, 'Mistral'],
   [/(^|\.)x\.ai$/, 'xAI Grok'],
   [/(^|\.)minimax(i)?\.(chat|com|io)$/, 'MiniMax'],
-  [/(^|\.)baichuan-ai\.com$/, '百川'],
-  [/(^|\.)lingyiwanwu\.com$/, '零一万物'],
-  [/^qianfan\.baidubce\.com$|^aip\.baidubce\.com$/, '百度千帆'],
-  [/hunyuan\.(tencentcloudapi|cloud\.tencent)\.com$/, '腾讯混元'],
+  [/(^|\.)baichuan-ai\.com$/, '百川', 'Baichuan'],
+  [/(^|\.)lingyiwanwu\.com$/, '零一万物', '01.AI'],
+  [/^qianfan\.baidubce\.com$|^aip\.baidubce\.com$/, '百度千帆', 'Baidu Qianfan'],
+  [/hunyuan\.(tencentcloudapi|cloud\.tencent)\.com$/, '腾讯混元', 'Tencent Hunyuan'],
   [/openai\.azure\.com$/, 'Azure OpenAI'],
   [/(^|\.)cohere\.(ai|com)$/, 'Cohere'],
   [/(^|\.)together\.(xyz|ai)$/, 'Together AI'],
   [/(^|\.)perplexity\.ai$/, 'Perplexity'],
   [/(^|\.)github\.com$/, 'GitHub'],
-  [/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/, '本地服务'],
+  [/^(localhost|127\.0\.0\.1):11434$/, 'Ollama'],
+  [/^(localhost|127\.0\.0\.1):1234$/, 'LM Studio'],
+  [/^api\.fireworks\.ai$/, 'Fireworks AI'],
+  [/^(router|api-inference)\.huggingface\.co$/, 'Hugging Face'],
+  [/^gateway\.ai\.cloudflare\.com$/, 'Cloudflare AI Gateway'],
+  [/^api\.replicate\.com$/, 'Replicate'],
+  [/^api\.cerebras\.ai$/, 'Cerebras'],
+  [/^api\.sambanova\.ai$/, 'SambaNova'],
+  [/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?$/, '本地服务', 'Local service'],
 ];
 
-export function friendlyHostName(host: string): string {
+export function friendlyHostName(host: string, lang: Language = 'zh'): string {
   const h = host.toLowerCase();
-  for (const [re, name] of KNOWN_HOSTS) if (re.test(h)) return `${name} · ${host}`;
+  for (const [re, zh, en = zh] of KNOWN_HOSTS) if (re.test(h)) return `${tr(lang, zh, en)} · ${host}`;
   return host;
 }
 
-const ENDPOINT_NAMES: [RegExp, string][] = [
-  [/\/chat\/completions\/?$/, '对话补全'],
-  [/\/completions\/?$/, '文本补全'],
-  [/\/embeddings\/?$/, '向量嵌入'],
-  [/\/images\/generations\/?$/, '图像生成'],
-  [/\/images\/edits\/?$/, '图像编辑'],
-  [/\/images\/variations\/?$/, '图像变体'],
-  [/\/audio\/speech\/?$/, '语音合成'],
-  [/\/audio\/transcriptions\/?$/, '语音转写'],
-  [/\/audio\/translations\/?$/, '语音翻译'],
-  [/\/moderations\/?$/, '内容审核'],
-  [/\/rerank\/?$/, '重排序'],
-  [/\/responses\/?$/, 'Responses 接口'],
-  [/\/messages\/count_tokens\/?$/, 'Token 计数'],
-  [/\/messages\/?$/, '消息对话'],
-  [/:streamGenerateContent$/, '流式生成内容'],
-  [/:generateContent$/, '生成内容'],
-  [/:embedContent$/, '向量嵌入'],
-  [/:countTokens$/, 'Token 计数'],
-  [/\/models\/?$/, '模型列表'],
-  [/\/files\/?$/, '文件列表'],
-  [/\/batches\/?$/, '批处理'],
-  [/\/fine[_-]?tuning\/jobs\/?$/, '微调任务'],
-  [/\/(user\/)?balance\/?$/, '余额查询'],
-  [/\/dashboard\/billing\/(subscription|usage)\/?$/, '账单查询'],
-  [/\/videos?\/generations?\/?$/, '视频生成'],
-  [/\/graphql\/?$/, 'GraphQL 查询'],
+const ENDPOINT_NAMES: [RegExp, string, string][] = [
+  [/\/api\/chat\/?$/, 'Ollama 对话', 'Ollama Chat'],
+  [/\/api\/generate\/?$/, 'Ollama 文本生成', 'Ollama Text Generation'],
+  [/\/api\/tags\/?$/, '本地模型列表', 'Local Models'],
+  [/\/api\/embed(?:dings)?\/?$/, '向量嵌入', 'Embeddings'],
+  [/\/api\/pull\/?$/, '拉取模型', 'Pull Model'],
+  [/\/api\/show\/?$/, '模型信息', 'Model Info'],
+  [/\/chat\/completions\/?$/, '对话补全', 'Chat Completions'],
+  [/\/completions\/?$/, '文本补全', 'Text Completions'],
+  [/\/embeddings\/?$/, '向量嵌入', 'Embeddings'],
+  [/\/images\/generations\/?$/, '图像生成', 'Image Generation'],
+  [/\/images\/edits\/?$/, '图像编辑', 'Image Edits'],
+  [/\/images\/variations\/?$/, '图像变体', 'Image Variations'],
+  [/\/audio\/speech\/?$/, '语音合成', 'Text to Speech'],
+  [/\/audio\/transcriptions\/?$/, '语音转写', 'Audio Transcription'],
+  [/\/audio\/translations\/?$/, '语音翻译', 'Audio Translation'],
+  [/\/moderations\/?$/, '内容审核', 'Moderation'],
+  [/\/rerank\/?$/, '重排序', 'Rerank'],
+  [/\/responses\/?$/, 'Responses 接口', 'Responses'],
+  [/\/messages\/count_tokens\/?$/, 'Token 计数', 'Count Tokens'],
+  [/\/messages\/?$/, '消息对话', 'Messages'],
+  [/:streamGenerateContent$/, '流式生成内容', 'Stream Content'],
+  [/:generateContent$/, '生成内容', 'Generate Content'],
+  [/:embedContent$/, '向量嵌入', 'Embeddings'],
+  [/:countTokens$/, 'Token 计数', 'Count Tokens'],
+  [/\/models\/?$/, '模型列表', 'Models'],
+  [/\/files\/?$/, '文件列表', 'Files'],
+  [/\/batches\/?$/, '批处理', 'Batches'],
+  [/\/fine[_-]?tuning\/jobs\/?$/, '微调任务', 'Fine-tuning Jobs'],
+  [/\/(user\/)?balance\/?$/, '余额查询', 'Balance'],
+  [/\/dashboard\/billing\/(subscription|usage)\/?$/, '账单查询', 'Billing'],
+  [/\/videos?\/generations?\/?$/, '视频生成', 'Video Generation'],
+  [/\/graphql\/?$/, 'GraphQL 查询', 'GraphQL Query'],
 ];
 
 function truncate(s: string, n: number) {
@@ -129,7 +144,7 @@ function truncate(s: string, n: number) {
   return t.length > n ? t.slice(0, n) + '…' : t;
 }
 
-export function suggestRequestName(method: string, url: string, bodyText: string): string {
+export function suggestRequestName(method: string, url: string, bodyText: string, lang: Language = 'zh'): string {
   let path = '';
   try {
     path = new URL(url.replace(/\{\{[^}]+\}\}/g, 'x')).pathname;
@@ -138,9 +153,9 @@ export function suggestRequestName(method: string, url: string, bodyText: string
   }
   path = decodeURIComponentSafe(path);
   let name = '';
-  for (const [re, n] of ENDPOINT_NAMES) {
+  for (const [re, zh, en] of ENDPOINT_NAMES) {
     if (re.test(path)) {
-      name = n;
+      name = tr(lang, zh, en);
       break;
     }
   }
@@ -176,7 +191,7 @@ export function suggestRequestName(method: string, url: string, bodyText: string
   else if (typeof body?.prompt === 'string') snippet = body.prompt as string;
   if (snippet) parts.push(truncate(snippet, 16));
   let result = parts.join(' · ');
-  if (body?.stream === true) result += '（流式）';
+  if (body?.stream === true) result += tr(lang, '（流式）', ' (streaming)');
   return result;
 }
 
@@ -250,7 +265,7 @@ export function planImport(
   if (target === '__root__') {
     folder = { kind: 'root', name: '（根目录）', path: '（根目录）' };
   } else if (target === '__new__') {
-    const name = ov.newFolderName?.trim() || (host ? friendlyHostName(host) : '新文件夹');
+    const name = ov.newFolderName?.trim() || (host ? friendlyHostName(host, data.settings.language) : '新文件夹');
     folder = { kind: 'new', name, host: host || undefined, path: name };
   } else if (target !== '__auto__') {
     const f = wsFolders.find((x) => x.id === target);
@@ -261,10 +276,10 @@ export function planImport(
     const existing =
       wsFolders.find((f) => f.parentId === null && f.host === host) ??
       wsFolders.find((f) => f.host === host) ??
-      wsFolders.find((f) => f.name === host || f.name === friendlyHostName(host));
+      wsFolders.find((f) => f.name === host || f.name === friendlyHostName(host, data.settings.language));
     if (existing) folder = { kind: 'existing', id: existing.id, name: existing.name, host: existing.host, path: folderPath(data, existing.id) };
     else {
-      const name = friendlyHostName(host);
+      const name = friendlyHostName(host, data.settings.language);
       folder = { kind: 'new', name, host, path: name };
     }
   } else {
@@ -471,7 +486,7 @@ export function planImport(
   }));
   if (parsed.body.graphql) body.graphql = { ...parsed.body.graphql };
 
-  const name = ov.name?.trim() || suggestRequestName(parsed.method, parsed.url, parsed.body.text);
+  const name = ov.name?.trim() || suggestRequestName(parsed.method, parsed.url, parsed.body.text, data.settings.language);
 
   // 原始命令脱敏
   let masked = parsed.raw;

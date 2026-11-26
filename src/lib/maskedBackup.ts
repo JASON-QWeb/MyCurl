@@ -82,8 +82,37 @@ function scrubBody(text: string, scrub: (value: string) => string) {
 
 const userTextFields = new Set([
   'value', 'token', 'password', 'username', 'prefix', 'url', 'host', 'proxy', 'description',
-  'name', 'note', 'query', 'fileName', 'responseFilter',
+  'name', 'note', 'query', 'fileName', 'contentType', 'responseFilter', 'key',
 ]);
+
+function inspectCredentials(data: AppData, remember: Remember) {
+  for (const holder of [...data.folders, ...data.environments]) {
+    inspectFields(holder.variables ?? [], remember);
+    for (const v of holder.variables ?? []) if (v.secret) remember(v.value);
+  }
+  for (const folder of data.folders) {
+    inspectAuth(folder.auth, remember);
+    inspectFields(folder.headers ?? [], remember);
+  }
+  inspectUrl(data.settings.proxy ?? '', remember);
+  for (const req of data.requests) {
+    inspectAuth(req.auth, remember);
+    inspectFields(req.headers ?? [], remember);
+    inspectFields(req.params ?? [], remember, true);
+    inspectUrl(req.url, remember);
+    inspectFields([...(req.body?.form ?? []), ...(req.body?.multipart ?? [])], remember);
+    inspectJson(req.body?.text, remember);
+    inspectJson(req.body?.graphql?.variables, remember);
+  }
+}
+
+export function hasMaskedSecrets(data: AppData): boolean {
+  let masked = false;
+  inspectCredentials(data, value => {
+    if (value && (/•{4}/.test(value) || /^•+$/.test(value))) masked = true;
+  });
+  return masked;
+}
 
 export function maskedBackupJson(data: AppData): string {
   const copy: AppData = JSON.parse(JSON.stringify(data));
@@ -98,31 +127,21 @@ export function maskedBackupJson(data: AppData): string {
     replacements.set(encoded, mask);
     replacements.set(encoded.replace(/\+/g, '%20'), mask);
   };
-  for (const holder of [...copy.folders, ...copy.environments]) {
-    for (const v of holder.variables ?? []) if (v.secret) remember(v.value);
-  }
-  for (const folder of copy.folders) {
-    inspectAuth(folder.auth, remember);
-    inspectFields(folder.headers ?? [], remember);
-  }
-  inspectUrl(copy.settings.proxy ?? '', remember);
+  inspectCredentials(copy, remember);
   for (const req of copy.requests) {
-    inspectAuth(req.auth, remember);
-    inspectFields(req.headers ?? [], remember);
-    inspectFields(req.params ?? [], remember, true);
-    inspectUrl(req.url, remember);
-    inspectFields([...(req.body?.form ?? []), ...(req.body?.multipart ?? [])], remember);
-    inspectJson(req.body?.text, remember);
-    inspectJson(req.body?.graphql?.variables, remember);
     // Embedded files can contain arbitrary credentials. Keep field metadata for reattachment.
     for (const field of req.body?.multipart ?? []) delete field.fileData;
     removeSource(req);
   }
   const entries = [...replacements].sort(([a], [b]) => b.length - a.length);
-  const scrub = (value: string) => {
+  const scrub = (value: string, identifier = false) => {
     if (template.test(value)) return value;
     for (const [literal, masked] of entries) {
-      if (value.includes(literal)) value = value.split(literal).join(masked);
+      if (!value.includes(literal)) continue;
+      // A short password such as "pass" must not rename the variable "password".
+      if (identifier && literal.length <= 8 && /^[a-z\d]+$/i.test(literal)) {
+        value = value.replace(/[a-z\d]+/gi, part => part === literal ? masked : part);
+      } else value = value.split(literal).join(masked);
     }
     return value;
   };
@@ -131,5 +150,5 @@ export function maskedBackupJson(data: AppData): string {
     if (body?.graphql?.variables) body.graphql.variables = scrubBody(body.graphql.variables, scrub);
   }
   return JSON.stringify(copy, (key, value) =>
-    typeof value === 'string' && userTextFields.has(key) ? scrub(value) : value, 2);
+    typeof value === 'string' && userTextFields.has(key) ? scrub(value, key === 'key') : value, 2);
 }
