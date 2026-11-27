@@ -6,10 +6,11 @@ interface Props {
   menuClass: string;
   iconOnly?: boolean;
   disabled?: boolean;
+  onOpen?: () => void;
   children: (close: () => void) => ReactNode;
 }
 
-export function ResponseDropdown({ label, trigger, menuClass, iconOnly, disabled, children }: Props) {
+export function ResponseDropdown({ label, trigger, menuClass, iconOnly, disabled, onOpen, children }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const popup = useRef<HTMLDivElement>(null);
@@ -60,7 +61,7 @@ export function ResponseDropdown({ label, trigger, menuClass, iconOnly, disabled
     <div className="dropdown-wrap" ref={root}>
       <button ref={button} className={`btn btn-ghost btn-sm${iconOnly ? ' btn-icon' : ''}`}
         title={label} aria-label={iconOnly ? label : undefined} disabled={disabled}
-        aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(!open)}>
+        aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => { if (!open) onOpen?.(); setOpen(!open); }}>
         {trigger}
       </button>
       {open && <div ref={popup} id={id} role="group" aria-label={label} className={`menu-pop right ${menuClass}`}>

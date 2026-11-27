@@ -1,3 +1,5 @@
+import { responseHighlights, setResponseHighlights } from './responseHighlights';
+import type { MatchRange } from '../lib/responseSearch';
 import React, { useEffect, useRef } from 'react';
 import { EditorState, RangeSetBuilder, StateEffect, type Extension } from '@codemirror/state';
 import {
@@ -34,6 +36,8 @@ interface CodeEditorProps {
   placeholder?: string;
   vars?: VarMap;
   lineWrap?: boolean;
+  searchMatches?: MatchRange[];
+  activeMatchIndex?: number;
   onCtrlEnter?: () => void;
 }
 
@@ -201,7 +205,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   placeholder = '',
   vars,
   lineWrap = true,
-  onCtrlEnter,
+  onCtrlEnter, searchMatches, activeMatchIndex = -1,
 }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -256,7 +260,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         },
         ...defaultKeymap,
         ...historyKeymap,
-        ...searchKeymap,
+        ...(readOnly ? [] : searchKeymap),
         indentWithTab,
       ]),
     ];
@@ -264,7 +268,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     if (lineWrap) extensions.push(EditorView.lineWrapping);
     if (placeholder) extensions.push(cmPlaceholder(placeholder));
     if (readOnly) {
-      extensions.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
+      extensions.push(responseHighlights, EditorState.readOnly.of(true), EditorView.editable.of(false));
     } else {
       extensions.push(
         history(),
@@ -306,6 +310,17 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       });
     }
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !readOnly) return;
+    const effects: StateEffect<unknown>[] = [setResponseHighlights.of({ matches: searchMatches ?? [], active: activeMatchIndex })];
+    const match = searchMatches?.[activeMatchIndex];
+    if (match && match.from <= view.state.doc.length && typeof Range.prototype.getClientRects === 'function') {
+      effects.push(EditorView.scrollIntoView(match.from, { y: 'center' }));
+    }
+    view.dispatch({ effects });
+  }, [searchMatches, activeMatchIndex, value, language, readOnly, dark, fontSize, lineWrap, placeholder]);
 
   return <div ref={hostRef} className="editor-fill" />;
 };

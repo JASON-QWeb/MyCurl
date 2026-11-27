@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { HttpRequest, ResponseRecord } from '../lib/types';
 import { applyFilterToText } from '../lib/jq';
@@ -9,6 +9,8 @@ import { copyText, formatBytes, formatMs, isCredentialKey, maskSecret } from '..
 import { isComparableResponse } from '../lib/textDiff';
 import { useI18n } from '../lib/i18n';
 import { CodeEditor, type CodeLang } from './CodeEditor';
+import { useResponseFindShortcut } from './useResponseFindShortcut';
+import { EventField, ResponseSearchBar, useResponseSearch } from './ResponseSearchBar';
 import { ResponseStreamChat } from './ResponseStreamChat';
 import { ResponseDiffView } from './ResponseDiffView';
 import { ResponseFilterBar } from './ResponseFilterBar';
@@ -16,7 +18,7 @@ import { ResponseHistoryMenu } from './ResponseHistoryMenu';
 import { ResponseStatusPill } from './ResponseStatusPill';
 import './responsePane.css';
 import {
-  IconCopy,
+  IconCheck, IconSearch, IconCopy,
   IconDownload,
   IconEye,
   IconEyeOff,
@@ -100,7 +102,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
     return applyFilterToText(filterExpr.trim(), resp.body, lang);
   }, [resp, filterExpr, filterEnabled, stream, lang]);
 
-  const displayedBody = useMemo(() => {
+  const baseBody = useMemo(() => {
     if (!resp) return '';
     if (stream) return resp.body;
     if (filterResult?.ok) return filterResult.output;
@@ -128,21 +130,50 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
       toast(failure, 'error');
     }
   };
-  const copyBody = () => copy(stream ? streamCopyText(stream, displayedBody, bodyMode === 'pretty') : displayedBody,
+  const pane = useRef<HTMLElement>(null);
+  const searchable = !!resp && !resp.error && !resp.bodyBase64 && !baseline;
+  const search = useResponseSearch(baseBody, bodyMode === 'preview' ? stream : null, searchable, !!stream || /ndjson/i.test(resp?.contentType ?? ''));
+  const displayedBody = search.output;
+  const [focusRequest, requestFocus] = useState(0);
+  useEffect(() => {
+    if (!search.open) return;
+    if (stream && bodyMode === 'pretty') setBodyMode('preview');
+    if (!stream && isHtml && bodyMode === 'preview') setBodyMode('raw');
+  }, [stream, bodyMode, isHtml, search.open]);
+  const openSearch = (selection?: string) => {
+    if (selection) { search.setRegex(false); search.setQuery(selection); }
+    requestFocus(n => n + 1);
+    setTab('body');
+    search.setOpen(true);
+  };
+  useLayoutEffect(() => { if (focusRequest) { search.input.current?.focus(); search.input.current?.select(); } }, [focusRequest, search.input]);
+  useResponseFindShortcut(pane, !!resp && !resp.error, searchable, openSearch);
+  useEffect(() => {
+    if (search.events && search.active >= 0) pane.current?.querySelector('.sse-event-row .cm-resp-match-active')?.scrollIntoView?.({ block: 'nearest' });
+  }, [search.active, search.events]);
+  const [downloaded, setDownloaded] = useState(0);
+  useEffect(() => {
+    if (!downloaded) return;
+    const timer = setTimeout(() => setDownloaded(0), 1500);
+    return () => clearTimeout(timer);
+  }, [downloaded]);
+  const visibleText = stream && bodyMode === 'pretty' ? streamCopyText(stream, displayedBody, true) : displayedBody;
+  const copyBody = () => copy(visibleText,
     t('已复制响应内容', 'Copied response'), t('无法复制响应内容', 'Could not copy the response'));
 
-  const downloadBody = () => {
+  const downloadBody = async () => {
     if (!resp) return;
-    const ndjson = stream?.format === 'NDJSON';
-    const blob = resp.bodyBase64
-      ? new Blob([Uint8Array.from(atob(resp.bodyBase64), (c) => c.charCodeAt(0))], { type: resp.contentType || 'application/octet-stream' })
-      : new Blob([ndjson ? resp.body : displayedBody], { type: ndjson ? 'application/x-ndjson;charset=utf-8' : 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    const ext = ndjson ? 'ndjson' : resp.contentType.includes('json') ? 'json' : resp.contentType.includes('html') ? 'html' : 'txt';
-    a.download = `${req.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}.${ext}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    const chatText = stream && bodyMode === 'pretty' && visibleText !== displayedBody;
+    const mimeType = chatText ? 'text/plain;charset=utf-8' : resp.contentType || (resp.bodyBase64 ? 'application/octet-stream' : 'text/plain');
+    const mime = mimeType.split(';')[0].toLowerCase();
+    const binaryExt = mime.startsWith('image/') ? mime.slice(6).split('+')[0] : mime === 'application/pdf' ? 'pdf' : 'bin';
+    const ext = mime.includes('ndjson') ? 'ndjson' : mime.includes('json') ? 'json' : mime.includes('html') ? 'html' : resp.bodyBase64 ? binaryExt : 'txt';
+    const name = req.name.replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'response';
+    const saved = await useAppStore.getState().saveAndRecordDownload({
+      filename: `${name}${search.result ? '-filtered' : ''}.${ext}`, mimeType, source: 'response', requestName: req.name,
+      ...(resp.bodyBase64 ? { base64: resp.bodyBase64 } : { text: visibleText }),
+    });
+    if (saved) setDownloaded(n => n + 1);
   };
 
   const filteredHeaders = useMemo(() => {
@@ -154,7 +185,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
   const isVertical = vertical ?? data.settings.layout === 'vertical';
 
   return (
-    <section
+    <section ref={pane}
       className="pane"
       style={{
         borderLeft: isVertical ? 'none' : '1px solid var(--border)',
@@ -203,7 +234,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 <IconCopy size={13} />
               </button>
               <button className="btn btn-ghost btn-icon btn-sm" title={t('下载响应文件', 'Download response')} onClick={downloadBody}>
-                <IconDownload size={13} />
+                {downloaded ? <IconCheck size={13} className="download-saved" /> : <IconDownload size={13} />}
               </button>
             </>
           )}
@@ -221,6 +252,15 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
       {filterResult && !filterResult.ok && (
         <div className="jq-error">
           {t(`jq 筛选提示：${filterResult.error}（下方显示原始响应）`, `jq filter note: ${filterResult.error} (showing raw response)`)}
+          <button className="btn btn-sm" onClick={() => {
+            setComparison(null);
+            useAppStore.getState().updateRequest(req.id, { responseFilter: '' });
+            openSearch();
+            search.setRegex(false);
+            search.setCase(false);
+            search.setQuery(filterExpr.trim());
+            search.setMode('filter');
+          }}>{t(`按内容筛选「${filterExpr.trim().slice(0, 48)}」`, `Filter body for "${filterExpr.trim().slice(0, 48)}"`)}</button>
         </div>
       )}
 
@@ -266,18 +306,23 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
               </button>
             </div>
             {tab === 'body' && !isImage && !baseline && (
-              <div className="segmented">
-                <button className={bodyMode === 'pretty' ? 'active' : ''} onClick={() => setBodyMode('pretty')}>
-                  {stream ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
-                </button>
-                <button className={bodyMode === 'raw' ? 'active' : ''} onClick={() => setBodyMode('raw')}>
-                  {t('原始', 'Raw')}
-                </button>
-                {(isHtml || stream) && (
-                  <button className={bodyMode === 'preview' ? 'active' : ''} onClick={() => setBodyMode('preview')}>
-                    {stream ? t('事件流', 'Events') : t('网页预览', 'Preview')}
+              <div className="resp-view-controls">
+                {searchable && <button className="btn btn-ghost btn-sm" aria-expanded={search.open}
+                  title={t('查找/筛选 (⌘F / Ctrl+F)', 'Find / Filter (⌘F / Ctrl+F)')} onClick={() => openSearch()}>
+                  <IconSearch size={13}/>{t('查找/筛选', 'Find / Filter')}</button>}
+                <div className="segmented">
+                  <button className={bodyMode === 'pretty' ? 'active' : ''} onClick={() => { if (stream) search.close(); setBodyMode('pretty'); }}>
+                    {stream ? t('对话视图', 'Chat') : t('美化', 'Pretty')}
                   </button>
-                )}
+                  <button className={bodyMode === 'raw' ? 'active' : ''} onClick={() => setBodyMode('raw')}>
+                    {t('原始', 'Raw')}
+                  </button>
+                  {(isHtml || stream) && (
+                    <button className={bodyMode === 'preview' ? 'active' : ''} onClick={() => { if (!stream) search.close(); setBodyMode('preview'); }}>
+                      {stream ? t('事件流', 'Events') : t('网页预览', 'Preview')}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -285,7 +330,13 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
           <div className="tab-panel">
             {tab === 'body' && (
               <>
-                {baseline ? (
+                {searchable && search.open && <ResponseSearchBar search={search} />}
+                {search.result && !search.result.matched ? (
+                  <div className="empty-state"><h3>{t(`未找到匹配「${search.query}」的内容`, `No matches for "${search.query}"`)}</h3>
+                    <div style={{ display: 'flex', gap: 8 }}><button className="btn btn-sm" onClick={() => search.setMode('find')}>{t('定位', 'Find')}</button>
+                    <button className="btn btn-sm" onClick={() => { search.setQuery(''); search.input.current?.focus(); }}>{t('清除筛选', 'Clear filter')}</button></div>
+                  </div>
+                ) : baseline ? (
                   <ResponseDiffView baseline={baseline} current={resp} onExit={() => setComparison(null)} />
                 ) : isImage ? (
                   <div className="tab-scroll" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -299,13 +350,13 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <ResponseStreamChat key={resp.id} stream={stream} />
                 ) : stream && bodyMode === 'preview' ? (
                   <div className="tab-scroll" style={{ padding: 0 }}>
-                    {stream.events.map((ev, idx) => (
+                    {search.events?.rows.map(({ ev, idx, event, data }) => (
                       <div key={idx} className="sse-event-row">
                         <span style={{ color: 'var(--text-muted)', width: 32, flexShrink: 0 }}>#{idx + 1}</span>
                         {ev.event && <span className="pill pill-accent">{
-                          stream.format === 'NDJSON' && ev.event === 'error' ? t('错误', 'Error') : ev.event
+                          (!search.open || !search.query) && stream.format === 'NDJSON' && ev.event === 'error' ? t('错误', 'Error') : <EventField field={event} active={search.active}/>
                         }</span>}
-                        <span style={{ wordBreak: 'break-all', color: 'var(--text-dim)' }}>{ev.data}</span>
+                        <span style={{ wordBreak: 'break-all', color: 'var(--text-dim)' }}><EventField field={data} active={search.active}/></span>
                       </div>
                     ))}
                   </div>
@@ -319,6 +370,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                 ) : (
                   <CodeEditor
                     value={displayedBody}
+                    searchMatches={search.hits.matches} activeMatchIndex={search.active}
                     readOnly
                     language={editorLang}
                     dark={dark}
@@ -334,6 +386,7 @@ export const ResponsePane: React.FC<{ req: HttpRequest; dark: boolean; vertical?
                   <input
                     className="input input-sm"
                     style={{ width: '100%' }}
+                    data-response-header-filter
                     placeholder={t('过滤响应头…', 'Filter headers…')}
                     value={headerQuery}
                     onChange={(e) => setHeaderQuery(e.target.value)}

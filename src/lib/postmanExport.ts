@@ -4,7 +4,7 @@ import { findTemplateVars, folderChain } from './template';
 import { tr } from './translate';
 import type { AppData, Auth, Folder, HttpRequest, KV, RequestBody, Variable } from './types';
 import { parseQuery, splitUrl, syncUrlFromParams } from './urlParams';
-import { downloadJsonFile } from './util';
+import { useAppStore } from '../store/useAppStore';
 
 const schema = 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json';
 interface ExportOptions { workspaceId: string; folderId?: string; maskSecrets?: boolean }
@@ -145,5 +145,6 @@ export function exportPostmanCollection(data: AppData, opts: ExportOptions): str
 }
 
 export function downloadPostmanCollection(data: AppData, workspaceId: string, folderId?: string) {
-  downloadJsonFile(exportPostmanCollection(data, { workspaceId, folderId }), 'mycurl.postman_collection.json');
+  return useAppStore.getState().saveAndRecordDownload({ text: exportPostmanCollection(data, { workspaceId, folderId }),
+    filename: 'mycurl.postman_collection.json', mimeType: 'application/json', source: 'postman' });
 }

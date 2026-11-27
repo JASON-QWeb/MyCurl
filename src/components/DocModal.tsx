@@ -7,7 +7,7 @@ import { MarkdownView } from './MarkdownView';
 import { IconCopy, IconDoc, IconDownload, IconX } from './Icons';
 
 export const DocModal: React.FC = () => {
-  const { data, docModal, setDocModal, toast } = useAppStore();
+  const { data, docModal, setDocModal, saveAndRecordDownload, toast } = useAppStore();
   const { t } = useI18n();
   const [view, setView] = useState<'preview' | 'raw'>('preview');
 
@@ -25,14 +25,8 @@ export const DocModal: React.FC = () => {
   const title = folder ? t(`目录归档文档 · ${folder.name}`, `Folder Docs · ${folder.name}`) : t('工作区 API 归档文档', 'Workspace API Docs');
 
   const download = () => {
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
     const slug = (folder?.name || data.workspaces.find((w) => w.id === wsId)?.name || 'api-docs').replace(/[^\w\u4e00-\u9fa5.-]+/g, '_');
-    a.download = `${slug}.md`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast(t('已下载 Markdown 文档', 'Downloaded Markdown docs'), 'success');
+    void saveAndRecordDownload({ filename: `${slug}.md`, text: md, mimeType: 'text/markdown;charset=utf-8', source: 'doc' });
   };
 
   return (

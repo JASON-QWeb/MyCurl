@@ -16,7 +16,6 @@ import { importHttpFile, looksLikeHttpFile } from '../lib/httpFileImport';
 import { importOpenApiDocument, isOpenApiDocument } from '../lib/openapiImport';
 import { downloadPostmanCollection } from '../lib/postmanExport';
 import { hasMaskedSecrets } from '../lib/maskedBackup';
-import { downloadJsonFile } from '../lib/util';
 import type { AppData, CurlCopySecretMode } from '../lib/types';
 import { IconDownload, IconSettings, IconUpload, IconX } from './Icons';
 
@@ -47,7 +46,7 @@ function KeyboardShortcuts() {
 export const SettingsModal: React.FC = () => {
   const {
     data,
-    serverInfo,
+    serverInfo, saveAndRecordDownload, revealInFolder,
     settingsModal,
     setSettingsModal,
     updateSettings,
@@ -69,13 +68,8 @@ export const SettingsModal: React.FC = () => {
 
   const downloadJson = (maskSecrets: boolean) => {
     const content = exportMyCurlJson(data, maskSecrets);
-    downloadJsonFile(content, `mycurl-backup${maskSecrets ? '-masked' : ''}-${new Date().toISOString().slice(0, 10)}.json`);
-    toast(
-      maskSecrets
-        ? t('已导出脱敏备份 JSON', 'Exported masked backup JSON')
-        : t('已导出完整备份 JSON', 'Exported full backup JSON'),
-      'success',
-    );
+    void saveAndRecordDownload({ text: content, source: 'backup', mimeType: 'application/json',
+      filename: `mycurl-backup${maskSecrets ? '-masked' : ''}-${new Date().toISOString().slice(0, 10)}.json` });
   };
 
   const finishImport = (format: string, result: { data: AppData; folderCount: number; requestCount: number }) => {
@@ -331,6 +325,9 @@ export const SettingsModal: React.FC = () => {
                 </span>
               )}
             </div>
+            {serverInfo?.downloadDir && <div className="download-directory">{t('下载目录：', 'Download directory: ')}
+              <code className="mono">{serverInfo.downloadDir}</code><button className="btn btn-sm" onClick={() => revealInFolder(serverInfo.downloadDir!)}>
+                {t('打开文件夹', 'Show in Folder')}</button></div>}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <input
                 ref={fileInputRef}

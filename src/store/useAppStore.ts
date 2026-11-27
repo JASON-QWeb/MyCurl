@@ -1,3 +1,4 @@
+import { createDownloadActions, type DownloadState } from './downloadActions';
 import { create } from 'zustand';
 import type { AppData, Environment, Folder, HttpRequest, ResponseRecord, Settings, Workspace } from '../lib/types';
 import { newEnvironment, newFolder, newRequest, newWorkspace, normalizeData, seedData } from '../lib/factory';
@@ -16,6 +17,8 @@ export interface ToastItem {
   id: string;
   kind: 'info' | 'success' | 'warning' | 'error';
   message: string;
+  action?: { label: string; onClick: () => void };
+  durationMs?: number;
 }
 
 export interface DialogState {
@@ -35,7 +38,7 @@ export interface InFlightState {
   partial: ResponseRecord;
 }
 
-export interface AppStore {
+export interface AppStore extends DownloadState {
   data: AppData;
   loaded: boolean;
   saving: boolean;
@@ -143,7 +146,7 @@ export interface AppStore {
   confirm: (opts: { title: string; message?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }) => Promise<boolean>;
   prompt: (opts: { title: string; message?: string; defaultValue?: string; placeholder?: string; confirmLabel?: string; cancelLabel?: string }) => Promise<string | null>;
   closeDialog: (result: boolean | string | null) => void;
-  toast: (message: string, kind?: ToastItem['kind']) => void;
+  toast: (message: string, kind?: ToastItem['kind'], options?: Pick<ToastItem, 'action' | 'durationMs'>) => void;
   removeToast: (id: string) => void;
 }
 
@@ -158,6 +161,7 @@ function firstRequestInWs(data: AppData, wsId: string): HttpRequest | undefined 
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
+  ...createDownloadActions(get, set),
   data: seedData(),
   loaded: false,
   saving: false,
@@ -194,6 +198,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       expandedFolders: expanded,
       selection: firstReq ? { kind: 'request', id: firstReq.id } : null,
     });
+    void get().loadDownloads();
     if (loaded.warning) get().toast(loaded.warning, 'warning');
     if (!loaded.data) scheduleSave(data, set, true);
     if (firstReq) {
@@ -776,10 +781,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     fn?.(result);
   },
 
-  toast: (message, kind = 'info') => {
+  toast: (message, kind = 'info', options) => {
     const id = uid('toast_');
-    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, kind, message }] }));
-    setTimeout(() => get().removeToast(id), 3600);
+    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, kind, message, ...options }] }));
+    setTimeout(() => get().removeToast(id), options?.durationMs ?? (options?.action ? 6000 : 3600));
   },
 
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),

@@ -196,7 +196,7 @@ impl Storage {
     }
 }
 
-fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), String> {
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

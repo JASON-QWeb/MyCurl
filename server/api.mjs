@@ -4,6 +4,7 @@
  *  - /api/history   每个请求的响应历史
  *  - /api/send      代发 HTTP 请求（无 CORS 限制），以 NDJSON 流式返回
  */
+import { downloadsStore } from './downloads.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -305,6 +306,8 @@ export function createApi({ dataDir = defaultDataDir(), allowedPorts = [] } = {}
   ensureDir(historyDir);
   ensureDir(backupDir);
   const dataFile = path.join(activeDataDir, 'data.json');
+  const downloadDir = path.resolve(process.env.MYCURL_DOWNLOAD_DIR || path.join(os.homedir(), 'Downloads'));
+  const downloads = downloadsStore(activeDataDir, downloadDir, atomicWrite);
   let lastBackup = 0;
 
   async function backup() {
@@ -340,7 +343,19 @@ export function createApi({ dataDir = defaultDataDir(), allowedPorts = [] } = {}
     try {
       const p = url.pathname;
       if (p === '/api/info' && req.method === 'GET') {
-        return sendJson(res, 200, { version: VERSION, dataDir: activeDataDir, platform: process.platform, node: process.version });
+        return sendJson(res, 200, { version: VERSION, downloadDir, dataDir: activeDataDir, platform: process.platform, node: process.version });
+      }
+      if (p === '/api/downloads') {
+        if (req.method === 'GET') return sendJson(res, 200, await downloads.list());
+        if (req.method === 'POST') return sendJson(res, 201, await downloads.save(JSON.parse(await readBody(req))));
+        if (req.method === 'DELETE') {
+          await downloads.remove(url.searchParams.get('id'));
+          return sendJson(res, 200, { ok: true });
+        }
+      }
+      if (p === '/api/downloads/reveal' && req.method === 'POST') {
+        await downloads.reveal(JSON.parse(await readBody(req)).path);
+        return sendJson(res, 200, { ok: true });
       }
       if (p === '/api/data' && req.method === 'GET') {
         if (!fs.existsSync(dataFile)) return sendJson(res, 200, { data: null });
@@ -396,7 +411,7 @@ export function createApi({ dataDir = defaultDataDir(), allowedPorts = [] } = {}
       if (p === '/api/send' && req.method === 'POST') return handleSend(req, res);
       return sendJson(res, 404, { error: '接口不存在' });
     } catch (e) {
-      if (!res.headersSent) return sendJson(res, 500, { error: e?.message || String(e) });
+      if (!res.headersSent) return sendJson(res, [400, 403].includes(e?.status) ? e.status : 500, { error: e?.message || String(e) });
       res.end();
     }
   };

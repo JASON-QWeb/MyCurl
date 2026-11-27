@@ -1,5 +1,6 @@
 //! MyCurl Rust 核心入口（Tauri v2）
 
+mod downloads;
 pub mod http_engine;
 pub mod storage;
 
@@ -12,6 +13,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub struct AppState {
+    downloads: downloads::Downloads,
     pub storage: Storage,
     pub cancels: CancelRegistry,
 }
@@ -21,6 +23,7 @@ pub struct AppState {
 pub struct AppInfo {
     pub version: String,
     pub data_dir: String,
+    pub download_dir: String,
     pub platform: String,
     pub arch: String,
     pub runtime: String,
@@ -31,10 +34,34 @@ fn app_info(state: State<'_, AppState>) -> AppInfo {
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.storage.data_dir().to_string_lossy().to_string(),
+        download_dir: state.downloads.dir.display().to_string(),
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         runtime: "rust-tauri".to_string(),
     }
+}
+
+#[tauri::command]
+fn save_download(
+    state: State<'_, AppState>,
+    payload: downloads::Payload,
+) -> Result<downloads::Record, String> {
+    state.downloads.save(payload)
+}
+
+#[tauri::command]
+fn list_downloads(state: State<'_, AppState>) -> Result<Vec<downloads::Record>, String> {
+    state.downloads.list()
+}
+
+#[tauri::command]
+fn delete_download(state: State<'_, AppState>, id: Option<String>) -> Result<(), String> {
+    state.downloads.delete(id)
+}
+
+#[tauri::command]
+fn reveal_in_folder(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    state.downloads.reveal(std::path::Path::new(&path))
 }
 
 #[tauri::command]
@@ -108,6 +135,7 @@ pub fn run() {
     let storage =
         Storage::new(Storage::default_data_dir()).expect("无法初始化 MyCurl 本地存储目录");
     let state = AppState {
+        downloads: downloads::Downloads::new(storage.data_dir()),
         storage,
         cancels: CancelRegistry::default(),
     };
@@ -117,6 +145,10 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             app_info,
+            save_download,
+            list_downloads,
+            delete_download,
+            reveal_in_folder,
             load_data,
             save_data,
             load_history,

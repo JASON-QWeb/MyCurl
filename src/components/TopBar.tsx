@@ -1,3 +1,4 @@
+import { DownloadsMenu } from './DownloadsMenu';
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useI18n } from '../lib/i18n';
@@ -308,6 +309,7 @@ export const TopBar: React.FC = () => {
       </div>
 
       <div className="topbar-right">
+        <DownloadsMenu />
         {saving && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('保存中…', 'Saving…')}</span>}
 
         <button

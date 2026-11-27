@@ -190,3 +190,19 @@ export interface ResponseRecord {
   requestBodyPreview?: string;
   redirects?: string[];
 }
+
+export type DownloadSource = 'response' | 'backup' | 'postman' | 'doc';
+
+export interface DownloadRecord {
+  id: string;
+  filename: string;
+  path?: string;
+  dir?: string;
+  size: number;
+  mimeType: string;
+  source: DownloadSource;
+  requestName?: string;
+  createdAt: number;
+  exists?: boolean;
+  browserFallback?: boolean;
+}

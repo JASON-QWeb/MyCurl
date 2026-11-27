@@ -4,6 +4,7 @@ import { isTauri, tauriInvoke } from './bridge';
 export interface ServerInfo {
   version: string;
   dataDir: string;
+  downloadDir?: string;
   platform: string;
   node?: string;
   arch?: string;

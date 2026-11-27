@@ -265,6 +265,7 @@ export const App: React.FC = () => {
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}`} onClick={() => removeToast(t.id)}>
             <span>{t.message}</span>
+            {t.action && <button className="btn btn-sm" onClick={e => { e.stopPropagation(); t.action?.onClick(); }}>{t.action.label}</button>}
           </div>
         ))}
       </div>

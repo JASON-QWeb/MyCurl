@@ -47,10 +47,10 @@ function lex(src: string): Tok[] {
       i++;
       continue;
     }
-    if (c === '"') {
+    if (c === '"' || c === "'") {
       let j = i + 1;
       let s = '';
-      while (j < src.length && src[j] !== '"') {
+      while (j < src.length && src[j] !== c) {
         if (src[j] === '\\' && j + 1 < src.length) {
           const e = src[j + 1];
           s += e === 'n' ? '\n' : e === 't' ? '\t' : e === 'r' ? '\r' : e;
@@ -718,8 +718,12 @@ function jsonPathToJq(expr: string): string {
   let e = expr.trim();
   if (!e.startsWith('$')) return e;
   e = e.slice(1);
-  e = e.replace(/\[\*\]/g, '[]').replace(/\.\*/g, '[]');
-  e = e.replace(/\['([^']*)'\]/g, '["$1"]');
+  // Match strings as whole tokens so wildcards inside quoted keys and values stay literal.
+  const tokens = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\[\*\]|\.\*|\[\?\(\s*@((?:\.[\w$]+)+)(?:\s*(==|!=)\s*('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?))?\s*\)\]/g;
+  e = e.replace(tokens, (token, field, op, literal) => {
+    if (field) return `[] | select(${field}${op ? ` ${op} ${literal}` : ''})`;
+    return token === '[*]' || token === '.*' ? '[]' : token;
+  });
   if (e.startsWith('..')) e = '..|' + e.slice(1);
   if (!e.startsWith('.') && !e.startsWith('[')) e = '.' + e;
   if (e.startsWith('[')) e = '.' + e;
